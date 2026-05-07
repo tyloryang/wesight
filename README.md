@@ -1,17 +1,17 @@
-# LobsterAI — All-in-One Personal Assistant Agent
+# WeSight
 
 <p align="center">
-  <img src="public/logo.png" alt="LobsterAI" width="120">
+  <img src="public/logo.png" alt="WeSight" width="120">
 </p>
 
 <p align="center">
-  <strong>A 24/7 personal assistant Agent that gets things done, built by NetEase Youdao</strong>
+  <strong>A desktop AI agent workspace for Claude Code, Codex, OpenClaw, Hermes Agent, and your own models.</strong>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
   <br>
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Mobile-brightgreen?style=for-the-badge" alt="Platform">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-brightgreen?style=for-the-badge" alt="Platform">
   <br>
   <img src="https://img.shields.io/badge/Electron-40-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
@@ -23,484 +23,204 @@
 
 ---
 
-**LobsterAI** is an all-in-one personal assistant Agent developed by [NetEase Youdao](https://www.youdao.com/). It works around the clock to handle your everyday tasks — data analysis, making presentations, generating videos, writing documents, searching the web, sending emails, scheduling tasks, and more.
+WeSight is an open-source desktop app that turns coding agents and automation runtimes into a friendly graphical workspace. It helps you start tasks, switch agent engines, configure model providers, review tool execution, manage skills, and keep long-running work organized from one place.
 
-At its core is **Cowork mode** — it executes tools, manipulates files, and runs commands in a local or sandboxed environment, all under your supervision. You can also chat with agent via Telegram, Discord, DingTalk or Feishu (Lark) and get work done from your phone anytime, anywhere.
+The goal is simple: install WeSight, choose an engine, configure your model once, then work with powerful agents through a polished chat interface.
 
-## Key Features
+## Highlights
 
-- **All-in-One Productivity Assistant** — Data analysis, PPT creation, video generation, document writing, web search, email — covers the full range of daily work
-- **Local + Sandbox Execution** — Run tasks directly on your machine or in an OpenClaw sandbox environment
-- **Built-in Skills** — Office document generation, web search, Playwright automation, Remotion video generation, and more
-- **Windows Built-in Python Runtime** — Windows packages bundle a ready-to-use Python interpreter runtime; Python skill dependencies can be installed on demand
-- **Scheduled Tasks** — Create recurring tasks via conversation or the GUI — daily news digests, inbox cleanup, periodic report generation, and more
-- **Persistent Memory** — Automatically extracts user preferences and personal facts from conversations, remembers your habits across sessions, and gets smarter the more you use it
-- **Mobile via IM** — Control your Agent remotely from your phone through Telegram, Discord, DingTalk, or Feishu
-- **Permission Gating** — All tool invocations require explicit user approval before execution
-- **Cross-Platform** — macOS (Intel + Apple Silicon), Windows, Linux desktop, plus mobile coverage via IM
-- **Local Data** — SQLite storage keeps your chat history and configuration on your device
+- **Multiple agent engines** - Use Claude Code, Codex, OpenClaw, Hermes Agent, or the built-in Claude Agent SDK runner from the same chat workspace.
+- **One-click engine setup** - WeSight can install and prepare supported local CLIs/runtimes for you. Claude Code and Codex CLI setup prefers npm on macOS; OpenClaw and Hermes Agent use WeSight-managed runtime builders.
+- **Use existing local CLI accounts** - If Claude Code or Codex is already installed and logged in, WeSight can reuse the local CLI configuration instead of forcing a new model setup.
+- **Unified model settings** - Configure OpenAI-compatible providers, Anthropic, DeepSeek, Qwen, Gemini, Moonshot, Ollama, OpenRouter, GitHub Copilot, and custom providers from one settings page.
+- **Graphical chat for CLI agents** - Claude Code and Codex feel like desktop chat apps: stream output, inspect tool calls, review command results, and continue the same session visually.
+- **Engine switching in context** - Pick an engine when creating a task, then switch from the chat header when the task needs a different runtime.
+- **Permission-aware execution** - File access, shell commands, and sensitive operations surface as reviewable events so you stay in control.
+- **Slash command panels** - Type `/` in chat to open command suggestions and agent context panels for model, status, help, config, skills, memory, and more.
+- **Skills and workflows** - Built-in skills cover web search, Office documents, spreadsheets, presentations, PDF work, Playwright automation, video generation, email, stock research, and more.
+- **Scheduled tasks** - Create recurring agent jobs for research, reports, inbox cleanup, reminders, or automation workflows.
+- **Memory and personalization** - WeSight can extract useful preferences from conversations and reuse them across future sessions.
+- **Desktop companion** - Optional desktop pet in Appearance settings, with animated sprites and lightweight interaction.
 
-## How It Works
+## Agent Engines
 
-<p align="center">
-  <img src="docs/res/architecture_en.png" alt="Architecture" width="500">
-</p>
+| Engine | Best For | Setup Path |
+| --- | --- | --- |
+| Built-in Claude Agent SDK | General local cowork sessions and skill execution | Included in WeSight |
+| Claude Code | Claude Code workflows in a graphical chat surface | macOS one-click CLI install or existing local CLI config |
+| Codex | Codex CLI workflows in a graphical chat surface | macOS one-click CLI install or existing local CLI config |
+| OpenClaw | Sandbox-style agent runtime and gateway integrations | WeSight-managed pinned runtime |
+| Hermes Agent | Local Hermes Agent runtime experiments | WeSight-managed pinned runtime |
+
+## Model Configuration
+
+WeSight has a unified model settings layer for user-facing configuration.
+
+- Add multiple providers and models.
+- Enable or disable providers without editing terminal config files.
+- Map WeSight model settings into Claude Code or Codex when using WeSight-managed configuration.
+- Use local CLI configuration for Claude Code or Codex when you want to keep the account/provider setup already present on your machine.
+- Configure custom OpenAI-compatible endpoints for local, private, or third-party model services.
+
+This lets beginners avoid CLI configuration while still giving advanced users control over their local agent environment.
 
 ## Quick Start
 
-### Prerequisites
+### Requirements
 
-- **Node.js** >= 24 < 25
-- **npm**
+- Node.js `>=24 <25`
+- npm
 
-### Install & Develop
+### Development
 
 ```bash
-# Clone the repository
-git clone https://github.com/netease-youdao/LobsterAI.git
-cd LobsterAI
-
-# Install dependencies
+git clone https://github.com/freestylefly/wesight.git
+cd wesight
 npm install
-
-# Start development (Vite dev server + Electron with hot reload)
 npm run electron:dev
 ```
 
-The dev server runs at `http://localhost:5175` by default.
+The Vite dev server runs at `http://localhost:5175`.
 
-#### Develop with OpenClaw Agent Engine
-
-LobsterAI can use [OpenClaw](https://github.com/openclaw/openclaw) as its agent engine.
-The required OpenClaw version is pinned in `package.json` under `openclaw.version`.
+### Development With Managed Runtimes
 
 ```bash
-# First run: automatically clones and builds OpenClaw (may take several minutes)
+# Build or reuse the pinned OpenClaw runtime, then start WeSight
 npm run electron:dev:openclaw
 
-# Subsequent runs: skips build if the pinned version hasn't changed
-npm run electron:dev:openclaw
+# Build or reuse the pinned Hermes Agent runtime, then start WeSight
+npm run electron:dev:hermes
 ```
 
-By default, OpenClaw source is cloned/managed at `../openclaw` (relative to this repo). Override with:
+Useful runtime environment variables:
 
 ```bash
+# Override OpenClaw source location
 OPENCLAW_SRC=/path/to/openclaw npm run electron:dev:openclaw
-```
 
-To force a rebuild even when the version hasn't changed:
-
-```bash
+# Force OpenClaw runtime rebuild
 OPENCLAW_FORCE_BUILD=1 npm run electron:dev:openclaw
-```
 
-To skip the automatic version checkout (e.g., when developing OpenClaw locally):
-
-```bash
+# Skip OpenClaw version checkout for local OpenClaw development
 OPENCLAW_SKIP_ENSURE=1 npm run electron:dev:openclaw
 ```
 
-### Production Build
+## Build
 
 ```bash
-# TypeScript compilation + Vite bundle
+# TypeScript + Vite + Electron bundle
 npm run build
 
-# ESLint check
+# ESLint
 npm run lint
 ```
 
-## Packaging & Distribution
-
-Uses [electron-builder](https://www.electron.build/) to produce platform-specific installers. Output goes to `release/`.
+## Packaging
 
 ```bash
-# macOS (.dmg)
+# macOS
 npm run dist:mac
-
-# macOS - Intel only
 npm run dist:mac:x64
-
-# macOS - Apple Silicon only
 npm run dist:mac:arm64
-
-# macOS - Universal (both architectures)
 npm run dist:mac:universal
 
-# Windows (.exe NSIS installer)
+# Windows
 npm run dist:win
 
-# Linux (.AppImage & .deb)
+# Linux
 npm run dist:linux
 ```
 
-Desktop packaging (macOS / Windows / Linux) bundles a prebuilt OpenClaw runtime under `Resources/cfmind`.
-The pinned OpenClaw version (`package.json` → `openclaw.version`) is automatically fetched and built during packaging — no manual setup needed.
-The build is cached: if the runtime for the pinned version already exists locally, the build step is skipped automatically.
+Runtime builders are pinned in `package.json`:
 
-You can also build OpenClaw runtime manually:
+- `openclaw.version`
+- `hermes.version`
 
-```bash
-# Build runtime for current host platform (auto-detect mac/win/linux + arch)
-npm run openclaw:runtime:host
-
-# Build explicit targets
-npm run openclaw:runtime:mac-arm64
-npm run openclaw:runtime:win-x64
-npm run openclaw:runtime:linux-x64
-```
-
-Override OpenClaw source path with an environment variable when needed:
-
-```bash
-OPENCLAW_SRC=/path/to/openclaw npm run dist:win
-```
-
-Windows builds bundle a portable Python runtime under `resources/python-win` (included as installer resource `python-win`), so end users do not need to install Python manually.
-The bundled runtime is interpreter-focused and does not preinstall LobsterAI skill Python packages; those can be installed at runtime on demand.
-By default, packaging downloads the official Python embeddable runtime from python.org if no prebuilt archive is provided.
-For offline/non-network builds, provide a prebuilt runtime archive explicitly.
-
-Offline/runtime source options for packaging:
-- `LOBSTERAI_PORTABLE_PYTHON_ARCHIVE`: Local prebuilt runtime archive path (recommended for offline CI/CD)
-- `LOBSTERAI_PORTABLE_PYTHON_URL`: Download URL for the prebuilt runtime archive
-- `LOBSTERAI_WINDOWS_EMBED_PYTHON_VERSION` / `LOBSTERAI_WINDOWS_EMBED_PYTHON_URL` / `LOBSTERAI_WINDOWS_GET_PIP_URL`: Optional overrides for Windows-host bootstrap sources
+Windows packages can bundle a portable Python runtime for Python-based skills. OpenClaw and Hermes runtime folders are generated under `vendor/` and ignored by Git.
 
 ## Architecture
 
-LobsterAI uses Electron's strict process isolation. All cross-process communication goes through IPC.
+WeSight uses Electron process isolation. The renderer never directly accesses Node.js APIs; all privileged operations go through a typed preload bridge and IPC handlers in the main process.
 
-### Process Model
+### Main Process
 
-**Main Process** (`src/main/main.ts`):
-- Window lifecycle management
+- Window lifecycle and tray behavior
 - SQLite persistence
-- CoworkRunner — Claude Agent SDK execution engine
-- IM Gateways — DingTalk, Feishu, Telegram, Discord remote access
-- 40+ IPC channel handlers
-- Security: context isolation enabled, node integration disabled, sandbox enabled
+- Agent engine routing
+- Claude Code and Codex external CLI adapters
+- OpenClaw and Hermes runtime managers
+- Skill loading and service management
+- Scheduled task engine
+- IM gateway and notification integrations
 
-**Preload Script** (`src/main/preload.ts`):
-- Exposes `window.electron` API via `contextBridge`
-- Includes `cowork` namespace for session management and stream events
+### Renderer
 
-**Renderer Process** (`src/renderer/`):
-- React 18 + Redux Toolkit + Tailwind CSS
-- All UI and business logic
-- Communicates with main process exclusively through IPC
+- React + Redux Toolkit + Tailwind CSS
+- Cowork chat UI
+- Engine selector and model selector
+- Settings, skills, scheduled tasks, agents, MCP, and appearance UI
+- Stream rendering for messages, tool calls, command output, and slash command panels
 
-### Directory Structure
+### Key Directories
 
-```
-src/
-├── main/                           # Electron main process
-│   ├── main.ts                     # Entry point, IPC handlers
-│   ├── preload.ts                  # Security bridge
-│   ├── sqliteStore.ts              # SQLite storage
-│   ├── coworkStore.ts              # Session/message CRUD
-│   ├── skillManager.ts             # Skill management
-│   ├── im/                         # IM gateways (DingTalk/Feishu/Telegram/Discord)
-│   └── libs/
-│       ├── coworkRunner.ts         # Agent SDK executor
-│       └── coworkMemoryExtractor.ts # Memory extraction
-│
-├── renderer/                        # React frontend
-│   ├── App.tsx                     # Root component
-│   ├── types/                      # TypeScript definitions
-│   ├── store/slices/               # Redux state slices
-│   ├── services/                   # Business logic (API/IPC/i18n)
-│   └── components/
-│       ├── cowork/                 # Cowork UI components
-│       ├── artifacts/              # Artifact renderers
-│       ├── skills/                 # Skill management UI
-│       ├── im/                     # IM integration UI
-│       └── Settings.tsx            # Settings panel
-│
-SKILLs/                              # Skill definitions
-├── skills.config.json              # Skill enable/disable and ordering
-├── web-search/                     # Web search
-├── docx/                           # Word document generation
-├── xlsx/                           # Excel spreadsheets
-├── pptx/                           # PowerPoint presentations
-├── pdf/                            # PDF processing
-├── remotion/                       # Video generation
-├── playwright/                     # Web automation
-└── ...                             # More skills
+```text
+src/main/
+  main.ts                         Electron entry and IPC handlers
+  preload.ts                      Safe renderer bridge
+  sqliteStore.ts                  Local persistence
+  coworkStore.ts                  Session and message storage
+  libs/agentEngine/               Engine adapters and router
+  libs/openclawEngineManager.ts   OpenClaw runtime lifecycle
+  libs/hermesEngineManager.ts     Hermes runtime lifecycle
+  libs/externalAgent*.ts          Claude Code and Codex CLI setup/config helpers
+  im/                             IM gateway integrations
+
+src/renderer/
+  App.tsx                         App shell
+  components/cowork/              Chat, engine selector, model selector, session UI
+  components/Settings.tsx         Model, engine, appearance, skills, memory, and app settings
+  components/pet/                 Desktop companion UI
+  services/                       IPC wrappers and app services
+  store/slices/                   Redux state
+
+SKILLs/                           Built-in skills
+scripts/                          Runtime, packaging, and setup scripts
+src/shared/                       Shared constants and types
 ```
 
-## Cowork System
+## Built-in Skills
 
-Cowork is the core feature of LobsterAI — an AI working session system built on the Claude Agent SDK. Designed for productivity scenarios, it can autonomously complete complex tasks like data analysis, document generation, and information retrieval.
+WeSight includes a broad skills library for day-to-day agent work:
 
-### Execution Modes
+| Area | Examples |
+| --- | --- |
+| Research | web search, tech news, stock research, film/music search |
+| Documents | DOCX, XLSX, PPTX, PDF processing |
+| Automation | Playwright, local tools, scheduled tasks |
+| Creative | Remotion video, frontend design, canvas design, Seedream, Seedance |
+| Communication | IMAP/SMTP email |
+| Agent building | skill creator, skill vetting, custom planning |
 
-| Mode | Description |
-|------|-------------|
-| `auto` | Automatically selects based on context |
-| `local` | Direct local execution, full speed |
-
-### Stream Events
-
-Cowork uses IPC events for real-time bidirectional communication:
-
-- `message` — New message added to the session
-- `messageUpdate` — Incremental streaming content update
-- `permissionRequest` — Tool execution requires user approval
-- `complete` — Session execution finished
-- `error` — Execution error occurred
-
-### Permission Control
-
-All tool invocations involving file system access, terminal commands, or network requests require explicit user approval in the `CoworkPermissionModal`. Both single-use and session-level approvals are supported.
-
-## Skills System
-
-LobsterAI ships with 16 built-in skills covering productivity, creative, and automation scenarios, configured via `SKILLs/skills.config.json`:
-
-| Skill | Function | Typical Use Case |
-|-------|----------|-----------------|
-| web-search | Web search | Information retrieval, research |
-| docx | Word document generation | Reports, proposals |
-| xlsx | Excel spreadsheet generation | Data analysis, dashboards |
-| pptx | PowerPoint creation | Presentations, business reviews |
-| pdf | PDF processing | Document parsing, format conversion |
-| remotion | Video generation (Remotion) | Promo videos, data visualization animations |
-| playwright | Web automation | Browser tasks, automated testing |
-| canvas-design | Canvas drawing and design | Posters, chart design |
-| frontend-design | Frontend UI design | Prototyping, page design |
-| develop-web-game | Web game development | Quick game prototypes |
-| scheduled-task | Scheduled tasks | Periodic automated workflows |
-| weather | Weather queries | Weather information |
-| local-tools | Local system tools | File management, system operations |
-| create-plan | Plan authoring | Project planning, task breakdown |
-| skill-creator | Custom skill creation | Extend new capabilities |
-| imap-smtp-email | Email send/receive | Email processing, auto-replies |
-
-Custom skills can be created via `skill-creator` and hot-loaded at runtime.
-
-## Scheduled Tasks
-
-LobsterAI supports scheduled tasks that let the Agent automatically execute recurring work on a set schedule.
-
-### How to Create
-
-- **Conversational** — Tell the Agent in natural language (e.g., "collect tech news for me every morning at 9 AM"), and it will create the scheduled task automatically
-- **GUI** — Add tasks manually in the Scheduled Tasks management panel with a visual interface for configuring timing and task content
-
-### Typical Scenarios
-
-| Scenario | Example |
-|----------|---------|
-| News Collection | Automatically gather industry news and generate a summary every morning |
-| Inbox Cleanup | Periodically check your inbox, categorize emails, and summarize important ones |
-| Data Reports | Generate a weekly business data analysis report |
-| Content Monitoring | Regularly check specific websites for changes and send notifications |
-| Work Reminders | Generate to-do lists or meeting notes on a schedule |
-
-Scheduled tasks are powered by Cron expressions, supporting minute, hourly, daily, weekly, and monthly intervals. When a task fires, it automatically starts a Cowork session. Results can be viewed on the desktop or pushed to your phone via IM.
-
-## IM Integration — Mobile Remote Control
-
-LobsterAI can bridge the Agent to multiple IM platforms. Send a message from your phone via IM to remotely trigger the desktop Agent — command your personal assistant anytime, anywhere.
-
-| Platform | Protocol | Description |
-|----------|----------|-------------|
-| DingTalk | DingTalk Stream | Enterprise robot bidirectional communication |
-| Feishu | Lark SDK | Feishu app robot |
-| Telegram | grammY | Bot API integration |
-| Discord | discord.js | Discord bot integration |
-| NetEase IM | node-nim V2 SDK | [NetEase IM P2P messaging](https://doc.yunxin.163.com/messaging2/getting-started) | |
-| NetEase Bee | node-nim V2 SDK | NetEase Bee Personal Digital Assistant |
-
-Configure the corresponding platform Token/Secret in the Settings panel to enable. Once set up, you can send instructions directly to the Agent from your phone IM (e.g., "analyze this dataset", "make a weekly summary PPT"), and the Agent will execute on the desktop and return results.
-
-## Persistent Memory
-
-LobsterAI has a built-in memory system that remembers your personal information and preferences across sessions, making the Agent more helpful the more you use it.
-
-### How Memories Are Captured
-
-- **Automatic Extraction** — During conversations, the system automatically identifies and stores your personal details (name, occupation), preferences (language, format, style), and personal facts (pets, tools you use) — no manual effort required
-- **Explicit Requests** — Tell the Agent directly, e.g., "remember that I prefer Markdown format" or "note down that my project is called LobsterAI," and it will store the memory with higher confidence
-- **Manual Management** — Add, edit, or delete memory entries in the Memory management panel within Settings
-
-### How It Works
-
-After each conversation turn, the memory extractor analyzes the dialogue:
-
-| Extraction Type | Example | Confidence |
-|----------------|---------|------------|
-| Personal Profile | "My name is Alex", "I'm a product manager" | High |
-| Personal Ownership | "I have a cat", "I use a MacBook" | High |
-| Personal Preferences | "I like a concise style", "I prefer English replies" | Medium-High |
-| Assistant Preferences | "Don't use emojis in replies", "Write code in TypeScript" | Medium-High |
-| Explicit Requests | "Remember this", "Please note that down" | Highest |
-
-Extracted memories are automatically deduplicated and merged, then injected into the Agent's context in subsequent sessions — making responses more personalized and aligned with your needs.
-
-### Memory Settings
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| Memory Toggle | Enable or disable the memory feature | On |
-| Auto Capture | Whether to automatically extract memories from conversations | On |
-| Capture Strictness | Strict / Standard / Relaxed — controls auto-extraction sensitivity | Standard |
-| Max Injected Items | Maximum number of memories injected per session (1–60) | 12 |
-
-## Data Storage
-
-All data is stored in a local SQLite database (`lobsterai.sqlite` in the user data directory).
-
-| Table | Purpose |
-|-------|---------|
-| `kv` | App configuration key-value pairs |
-| `cowork_config` | Cowork settings (working directory, system prompt, execution mode) |
-| `cowork_sessions` | Session metadata |
-| `cowork_messages` | Message history |
-| `scheduled_tasks` | Scheduled task definitions |
+Skills can be enabled, disabled, and routed from the desktop UI.
 
 ## Security Model
 
-LobsterAI enforces security at multiple layers:
+- Context isolation is enabled.
+- Node integration is disabled in the renderer.
+- Sensitive actions are routed through main-process IPC.
+- Tool execution can surface permission requests before running.
+- Local data is stored in SQLite under the app data directory.
+- Generated runtime folders, build artifacts, and local secrets are ignored by Git.
 
-- **Process Isolation** — Context isolation enabled, node integration disabled
-- **Permission Gating** — Tool invocations require explicit user approval
-- **Sandbox Execution** — Optional OpenClaw sandbox for isolated execution
-- **Content Security** — HTML sandbox, DOMPurify, Mermaid strict mode
-- **Workspace Boundaries** — File operations restricted to the designated working directory
-- **IPC Validation** — All cross-process calls are type-checked
+## Roadmap Ideas
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Framework | Electron 40 |
-| Frontend | React 18 + TypeScript |
-| Build | Vite 5 |
-| Styling | Tailwind CSS 3 |
-| State | Redux Toolkit |
-| AI Engine | Claude Agent SDK (Anthropic) |
-| Storage | sql.js |
-| Markdown | react-markdown + remark-gfm + rehype-katex |
-| Diagrams | Mermaid |
-| Security | DOMPurify |
-| IM | dingtalk-stream · @larksuiteoapi/node-sdk · grammY · discord.js |
-
-## Configuration
-
-### App Configuration
-
-App-level config is stored in the SQLite `kv` table, editable through the Settings panel.
-
-### Cowork Configuration
-
-Cowork session config includes:
-
-- **Working Directory** — Root directory for Agent operations
-- **System Prompt** — Customize Agent behavior
-- **Execution Mode** — `auto` / `local`
-
-### Internationalization
-
-Currently English and Chinese are supported. Switch languages in the Settings panel.
-
-## OpenClaw Version Management
-
-LobsterAI pins its OpenClaw dependency to a specific release version, declared in `package.json`:
-
-```json
-{
-  "openclaw": {
-    "version": "v2026.3.2",
-    "repo": "https://github.com/openclaw/openclaw.git"
-  }
-}
-```
-
-### How It Works
-
-| Step | What happens | When |
-|------|-------------|------|
-| **Version ensure** | Clones or checks out the pinned tag in `../openclaw` | Before every runtime build |
-| **Build cache check** | Compares pinned version with `runtime-build-info.json` | Before every runtime build |
-| **Full build** | `pnpm install` → `build` → `ui:build` → pack to asar | Only when version changed |
-
-### Updating OpenClaw Version
-
-1. Change `openclaw.version` in `package.json` to the desired release tag
-2. Run `npm run electron:dev:openclaw` or `npm run dist:win` — the new version is fetched and built automatically
-3. Commit the `package.json` change
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENCLAW_SRC` | Path to OpenClaw source directory | `../openclaw` |
-| `OPENCLAW_FORCE_BUILD` | Set to `1` to force rebuild even if version matches | — |
-| `OPENCLAW_SKIP_ENSURE` | Set to `1` to skip automatic version checkout | — |
-
-## Development Guidelines
-
-- TypeScript strict mode, functional components + Hooks
-- 2-space indentation, single quotes, semicolons
-- Components: `PascalCase`; functions/variables: `camelCase`; Redux slices: `*Slice.ts`
-- Tailwind CSS preferred; avoid custom CSS
-- Commit messages follow `type: short imperative summary` (e.g., `feat: add artifact toolbar`)
-
-## Testing
-
-Unit tests use [Vitest](https://vitest.dev/) and are co-located with the source files they cover.
-
-```bash
-# run all tests
-npm test
-
-# run tests for a specific module (Vitest filename filter)
-npm test -- logger
-npm test -- cowork
-```
-
-New test files go next to the source file they test, using the `.test.mjs` extension:
-
-```
-src/main/
-├── foo.ts
-└── foo.test.ts
-```
-
-Example (`src/main/logger.test.ts`):
-
-```ts
-import { test, expect } from 'vitest';
-
-test('log file pattern matches daily name', () => {
-  expect(/^main-\d{4}-\d{2}-\d{2}\.log$/.test('main-2026-03-20.log')).toBe(true);
-});
-```
-
-Avoid importing Electron-only APIs (e.g. `electron-log`) in tests — inline any logic that depends on them instead.
-
-
-
-## Contributing
-
-1. Fork this repository
-2. Create your feature branch (`git checkout -b feature/your-feature`)
-3. Commit your changes (`git commit -m 'feat: add something'`)
-4. Push to the branch (`git push origin feature/your-feature`)
-5. Open a Pull Request
-
-Please include in your PR description: a summary of changes, linked issue (if any), screenshots for UI changes, and notes on any Electron-specific behavior changes.
+- More engine adapters and runtime profiles
+- Better model migration and provider import flows
+- Shareable task templates
+- Richer slash command results
+- More visual inspection tools for long-running agent tasks
+- Plugin marketplace for community skills
 
 ## License
 
-[MIT License](LICENSE)
-
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=netease-youdao/LobsterAI&type=date&legend=top-left)](https://www.star-history.com/#netease-youdao/LobsterAI&type=date&legend=top-left)
-
----
-
-Built and maintained by [NetEase Youdao](https://www.youdao.com/).
+MIT. See [LICENSE](LICENSE).
