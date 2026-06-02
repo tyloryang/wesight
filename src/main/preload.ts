@@ -279,11 +279,15 @@ contextBridge.exposeInMainWorld('electron', {
   cowork: {
     // Session management
     startSession: (options: { prompt: string; cwd?: string; systemPrompt?: string; activeSkillIds?: string[]; agentId?: string; teamId?: string; imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }> }) =>
-      ipcRenderer.invoke('cowork:session:start', options),
+      ipcRenderer.invoke(CoworkIpcChannel.SessionStart, options),
     continueSession: (options: { sessionId: string; prompt: string; systemPrompt?: string; activeSkillIds?: string[]; imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }> }) =>
-      ipcRenderer.invoke('cowork:session:continue', options),
+      ipcRenderer.invoke(CoworkIpcChannel.SessionContinue, options),
     stopSession: (sessionId: string) =>
-      ipcRenderer.invoke('cowork:session:stop', sessionId),
+      ipcRenderer.invoke(CoworkIpcChannel.SessionStop, sessionId),
+    subscribeSession: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.SessionSubscribe, { sessionId }),
+    unsubscribeSession: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.SessionUnsubscribe, { sessionId }),
     deleteSession: (sessionId: string) =>
       ipcRenderer.invoke('cowork:session:delete', sessionId),
     deleteSessions: (sessionIds: string[]) =>
@@ -293,11 +297,21 @@ contextBridge.exposeInMainWorld('electron', {
     renameSession: (options: { sessionId: string; title: string }) =>
       ipcRenderer.invoke('cowork:session:rename', options),
     getSession: (sessionId: string) =>
-      ipcRenderer.invoke('cowork:session:get', sessionId),
+      ipcRenderer.invoke(CoworkIpcChannel.SessionGet, sessionId),
+    getSessionMeta: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.SessionGetMeta, sessionId),
+    getRecentMessages: (input: { sessionId: string; limit?: number }) =>
+      ipcRenderer.invoke(CoworkIpcChannel.SessionGetRecentMessages, input),
+    getMessagesAfter: (input: { sessionId: string; sequence: number }) =>
+      ipcRenderer.invoke(CoworkIpcChannel.SessionGetMessagesAfter, input),
+    getMessagesBefore: (input: { sessionId: string; sequence: number; limit?: number }) =>
+      ipcRenderer.invoke(CoworkIpcChannel.SessionGetMessagesBefore, input),
+    getSessionRuntimeSnapshot: (sessionId: string) =>
+      ipcRenderer.invoke(CoworkIpcChannel.SessionGetRuntimeSnapshot, sessionId),
     remoteManaged: (sessionId: string) =>
       ipcRenderer.invoke('cowork:session:remoteManaged', sessionId),
     listSessions: (agentId?: string) =>
-      ipcRenderer.invoke('cowork:session:list', agentId),
+      ipcRenderer.invoke(CoworkIpcChannel.SessionList, agentId),
     exportResultImage: (options: { rect: { x: number; y: number; width: number; height: number }; defaultFileName?: string }) =>
       ipcRenderer.invoke('cowork:session:exportResultImage', options),
     captureImageChunk: (options: { rect: { x: number; y: number; width: number; height: number } }) =>
@@ -345,6 +359,34 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke(CoworkIpcChannel.RuntimeMetricsCalls, filters),
     getRuntimeCallDetail: (callId: string) =>
       ipcRenderer.invoke(CoworkIpcChannel.RuntimeMetricsDetail, { callId }),
+    reportRendererReady: (input: {
+      firstPaintMs?: number;
+      firstInteractiveMs?: number;
+      configLoadedMs?: number;
+      recentSessionsLoadedMs?: number;
+    }) =>
+      ipcRenderer.invoke(CoworkIpcChannel.PerformanceRendererReady, input),
+    getStartupServicesStatus: () =>
+      ipcRenderer.invoke(CoworkIpcChannel.StartupServicesStatus),
+    onStartupServicesChanged: (callback: (services: Array<{
+      name: string;
+      status: 'pending' | 'running' | 'ready' | 'error' | 'degraded';
+      startedAt?: number;
+      finishedAt?: number;
+      durationMs?: number;
+      error?: string;
+    }>) => void) => {
+      const handler = (_event: IpcRendererEvent, services: Array<{
+        name: string;
+        status: 'pending' | 'running' | 'ready' | 'error' | 'degraded';
+        startedAt?: number;
+        finishedAt?: number;
+        durationMs?: number;
+        error?: string;
+      }>) => callback(services);
+      ipcRenderer.on(CoworkIpcChannel.StartupServicesChanged, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StartupServicesChanged, handler);
+    },
     ensureStudioAssets: () =>
       ipcRenderer.invoke(CoworkIpcChannel.StudioAssetsEnsure),
     installAgentCli: (appType: 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui') =>
@@ -417,13 +459,29 @@ contextBridge.exposeInMainWorld('electron', {
     // Stream event listeners
     onStreamMessage: (callback: (data: { sessionId: string; message: any }) => void) => {
       const handler = (_event: any, data: { sessionId: string; message: any }) => callback(data);
-      ipcRenderer.on('cowork:stream:message', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:message', handler);
+      ipcRenderer.on(CoworkIpcChannel.StreamMessage, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamMessage, handler);
     },
-    onStreamMessageUpdate: (callback: (data: { sessionId: string; messageId: string; content: string }) => void) => {
-      const handler = (_event: any, data: { sessionId: string; messageId: string; content: string }) => callback(data);
-      ipcRenderer.on('cowork:stream:messageUpdate', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:messageUpdate', handler);
+    onStreamMessageUpdate: (callback: (data: {
+      sessionId: string;
+      messageId: string;
+      content: string;
+      mode?: 'snapshot' | 'delta' | 'final';
+      offset?: number;
+      sequence?: number;
+      finalLength?: number;
+    }) => void) => {
+      const handler = (_event: any, data: {
+        sessionId: string;
+        messageId: string;
+        content: string;
+        mode?: 'snapshot' | 'delta' | 'final';
+        offset?: number;
+        sequence?: number;
+        finalLength?: number;
+      }) => callback(data);
+      ipcRenderer.on(CoworkIpcChannel.StreamMessageUpdate, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamMessageUpdate, handler);
     },
     onStreamFileActivity: (callback: (data: { sessionId: string; activity: CoworkFileActivity }) => void) => {
       const handler = (_event: IpcRendererEvent, data: { sessionId: string; activity: CoworkFileActivity }) => callback(data);
@@ -432,23 +490,23 @@ contextBridge.exposeInMainWorld('electron', {
     },
     onStreamPermission: (callback: (data: { sessionId: string; request: any }) => void) => {
       const handler = (_event: any, data: { sessionId: string; request: any }) => callback(data);
-      ipcRenderer.on('cowork:stream:permission', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:permission', handler);
+      ipcRenderer.on(CoworkIpcChannel.StreamPermission, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamPermission, handler);
     },
     onStreamPermissionDismiss: (callback: (data: { requestId: string }) => void) => {
       const handler = (_event: any, data: { requestId: string }) => callback(data);
-      ipcRenderer.on('cowork:stream:permissionDismiss', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:permissionDismiss', handler);
+      ipcRenderer.on(CoworkIpcChannel.StreamPermissionDismiss, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamPermissionDismiss, handler);
     },
     onStreamComplete: (callback: (data: { sessionId: string; claudeSessionId: string | null }) => void) => {
       const handler = (_event: any, data: { sessionId: string; claudeSessionId: string | null }) => callback(data);
-      ipcRenderer.on('cowork:stream:complete', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:complete', handler);
+      ipcRenderer.on(CoworkIpcChannel.StreamComplete, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamComplete, handler);
     },
     onStreamError: (callback: (data: { sessionId: string; error: string }) => void) => {
       const handler = (_event: any, data: { sessionId: string; error: string }) => callback(data);
-      ipcRenderer.on('cowork:stream:error', handler);
-      return () => ipcRenderer.removeListener('cowork:stream:error', handler);
+      ipcRenderer.on(CoworkIpcChannel.StreamError, handler);
+      return () => ipcRenderer.removeListener(CoworkIpcChannel.StreamError, handler);
     },
     onSessionsChanged: (callback: () => void) => {
       const handler = () => callback();

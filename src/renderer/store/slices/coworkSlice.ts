@@ -43,6 +43,18 @@ interface CoworkState {
   config: CoworkConfig;
 }
 
+type StreamMessageUpdateMode = 'snapshot' | 'delta' | 'final';
+
+interface StreamMessageUpdatePayload {
+  sessionId: string;
+  messageId: string;
+  content: string;
+  mode?: StreamMessageUpdateMode;
+  offset?: number;
+  sequence?: number;
+  finalLength?: number;
+}
+
 const initialState: CoworkState = {
   sessions: [],
   currentSessionId: null,
@@ -127,6 +139,32 @@ const mergeStreamingMessageContent = (previousContent: string, incomingContent: 
   // Delta mode: append the non-overlapping tail.
   const overlap = computeStreamingSuffixPrefixOverlap(previousContent, incomingContent);
   return previousContent + incomingContent.slice(overlap);
+};
+
+const applyStructuredStreamingMessageContent = (
+  previousContent: string,
+  payload: StreamMessageUpdatePayload,
+): string => {
+  const mode = payload.mode;
+  const offset = Math.max(0, payload.offset ?? 0);
+
+  if (mode === 'delta') {
+    const before = previousContent.slice(0, offset);
+    const afterStart = offset + payload.content.length;
+    const after = previousContent.length > afterStart ? previousContent.slice(afterStart) : '';
+    const merged = before + payload.content + after;
+    return typeof payload.finalLength === 'number' ? merged.slice(0, payload.finalLength) : merged;
+  }
+
+  if (mode === 'snapshot' || mode === 'final') {
+    const before = previousContent.slice(0, offset);
+    const afterStart = offset + payload.content.length;
+    const after = previousContent.length > afterStart ? previousContent.slice(afterStart) : '';
+    const merged = before + payload.content + after;
+    return typeof payload.finalLength === 'number' ? merged.slice(0, payload.finalLength) : merged;
+  }
+
+  return mergeStreamingMessageContent(previousContent, payload.content);
 };
 
 const coworkSlice = createSlice({
@@ -263,14 +301,38 @@ const coworkSlice = createSlice({
       markSessionUnread(state, sessionId);
     },
 
-    updateMessageContent(state, action: PayloadAction<{ sessionId: string; messageId: string; content: string }>) {
-      const { sessionId, messageId, content } = action.payload;
+    prependMessages(state, action: PayloadAction<{ sessionId: string; messages: CoworkMessage[] }>) {
+      const { sessionId, messages } = action.payload;
+      if (messages.length === 0 || state.currentSession?.id !== sessionId) return;
+      const existingIds = new Set(state.currentSession.messages.map((message) => message.id));
+      const newMessages = messages.filter((message) => !existingIds.has(message.id));
+      if (newMessages.length === 0) return;
+      state.currentSession.messages = [...newMessages, ...state.currentSession.messages];
+    },
+
+    appendMessages(state, action: PayloadAction<{ sessionId: string; messages: CoworkMessage[] }>) {
+      const { sessionId, messages } = action.payload;
+      if (messages.length === 0 || state.currentSession?.id !== sessionId) return;
+      const existingIds = new Set(state.currentSession.messages.map((message) => message.id));
+      const newMessages = messages.filter((message) => !existingIds.has(message.id));
+      if (newMessages.length === 0) return;
+      state.currentSession.messages.push(...newMessages);
+      state.currentSession.updatedAt = Math.max(
+        state.currentSession.updatedAt,
+        ...newMessages.map((message) => message.timestamp),
+      );
+    },
+
+    updateMessageContent(state, action: PayloadAction<StreamMessageUpdatePayload>) {
+      const { sessionId, messageId, content, mode } = action.payload;
 
       if (state.currentSession?.id === sessionId) {
         const messageIndex = state.currentSession.messages.findIndex(m => m.id === messageId);
         if (messageIndex !== -1) {
           const previousContent = state.currentSession.messages[messageIndex].content || '';
-          if (state.config.agentEngine === CoworkAgentEngine.YdCowork) {
+          if (mode) {
+            state.currentSession.messages[messageIndex].content = applyStructuredStreamingMessageContent(previousContent, action.payload);
+          } else if (state.config.agentEngine === CoworkAgentEngine.YdCowork) {
             state.currentSession.messages[messageIndex].content = mergeStreamingMessageContent(previousContent, content);
           } else {
             state.currentSession.messages[messageIndex].content = content;
@@ -409,6 +471,8 @@ export const {
   deleteSession,
   deleteSessions,
   addMessage,
+  appendMessages,
+  prependMessages,
   updateMessageContent,
   setStreaming,
   setRemoteManaged,

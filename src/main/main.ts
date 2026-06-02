@@ -60,7 +60,7 @@ import { AgentTeamRunner } from './agentTeamRunner';
 import { APP_NAME } from './appConstants';
 import { getAutoLaunchEnabled, isAutoLaunched, setAutoLaunchEnabled } from './autoLaunchManager';
 import { CoworkFileActivityTracker } from './coworkFileActivityTracker';
-import { type CoworkMessage, type CoworkSession,CoworkStore } from './coworkStore';
+import { type CoworkMessage, type CoworkSessionMeta,CoworkStore } from './coworkStore';
 import { setLanguage, t } from './i18n';
 import { IMGatewayConfig,IMGatewayManager } from './im';
 import { formatApiFetchLogPayload } from './libs/apiFetchLogSanitizer';
@@ -162,11 +162,20 @@ import {
   type OpenClawLocalFeishuDetection,
 } from './libs/openclawSystemRuntime';
 import { startOpenClawTokenProxy, stopOpenClawTokenProxy } from './libs/openclawTokenProxy';
+import {
+  getPerformanceSnapshot,
+  markTiming,
+  markTimingValue,
+  nowMs,
+  recordIpcSend,
+} from './libs/performanceMetrics';
 import { ensurePythonRuntimeReady } from './libs/pythonRuntime';
 import {
   type RuntimeModelSnapshot,
   RuntimeTelemetryTracker,
 } from './libs/runtimeTelemetryTracker';
+import { SessionSubscriptionRegistry } from './libs/sessionSubscriptions';
+import { type MessageUpdatePayload, StreamUpdateCoalescer } from './libs/streamUpdateCoalescer';
 import {
   applySystemProxyEnv,
   resolveSystemProxyUrl,
@@ -189,6 +198,7 @@ const INVALID_FILE_NAME_PATTERN = /[<>:"/\\|?*\u0000-\u001F]/g;
 const MIN_MEMORY_USER_MEMORIES_MAX_ITEMS = 1;
 const MAX_MEMORY_USER_MEMORIES_MAX_ITEMS = 60;
 const IPC_MESSAGE_CONTENT_MAX_CHARS = 120_000;
+const IPC_UPDATE_CONTENT_MAX_BYTES = 32 * 1024;
 const IPC_UPDATE_CONTENT_MAX_CHARS = 120_000;
 const IPC_STRING_MAX_CHARS = 4_000;
 const IPC_MAX_DEPTH = 5;
@@ -761,14 +771,80 @@ let externalAgentCliInstallerForwarderBound = false;
 let coworkRuntimeForwarderBound = false;
 let memoryMigrationDone = false;
 let preventSleepBlockerId: number | null = null;
+const sessionSubscriptions = new SessionSubscriptionRegistry();
+const sessionSubscriptionCleanupBoundWindowIds = new Set<number>();
 
 const HERMES_IM_SESSION_SYNC_INTERVAL_MS = 4000;
+
+const getTargetWindowsForSession = (sessionId: string, options: { fallbackToAll?: boolean } = {}): BrowserWindow[] => {
+  const subscribedWindowIds = new Set(sessionSubscriptions.getSubscribedWindows(sessionId).map(win => win.id));
+  const allWindows = BrowserWindow.getAllWindows().filter(win => !win.isDestroyed());
+  const subscribedWindows = allWindows.filter(win => subscribedWindowIds.has(win.webContents.id));
+  if (subscribedWindows.length > 0 || options.fallbackToAll !== true) {
+    return subscribedWindows;
+  }
+  return allWindows;
+};
+
+const sendCoworkStreamPayload = (
+  sessionId: string,
+  channel: CoworkIpcChannel,
+  type: Parameters<typeof recordIpcSend>[0]['type'],
+  payload: unknown,
+  options: { fallbackToAll?: boolean } = {},
+): void => {
+  const windows = getTargetWindowsForSession(sessionId, options);
+  windows.forEach((win) => {
+    if (win.isDestroyed()) return;
+    try {
+      recordIpcSend({
+        type,
+        sessionId,
+        channel,
+        payload,
+        windowCount: 1,
+      });
+      win.webContents.send(channel, payload);
+    } catch (error) {
+      console.error('[CoworkForwarder] failed to forward cowork stream payload:', error);
+    }
+  });
+};
+
+const bindSessionSubscriptionCleanup = (webContents: WebContents): void => {
+  if (sessionSubscriptionCleanupBoundWindowIds.has(webContents.id)) return;
+  sessionSubscriptionCleanupBoundWindowIds.add(webContents.id);
+  webContents.once('destroyed', () => {
+    sessionSubscriptions.removeWindow(webContents.id);
+    sessionSubscriptionCleanupBoundWindowIds.delete(webContents.id);
+  });
+};
+
+const subscribeSenderToCoworkSession = (webContents: WebContents, sessionId: string): void => {
+  if (!sessionId || webContents.isDestroyed()) return;
+  sessionSubscriptions.subscribe(sessionId, webContents);
+  bindSessionSubscriptionCleanup(webContents);
+};
+
+const messageUpdateCoalescer = new StreamUpdateCoalescer({
+  flushIntervalMs: 500,
+  maxPayloadBytes: IPC_UPDATE_CONTENT_MAX_BYTES,
+  send: (payload: MessageUpdatePayload) => {
+    sendCoworkStreamPayload(
+      payload.sessionId,
+      CoworkIpcChannel.StreamMessageUpdate,
+      'messageUpdate',
+      payload,
+    );
+  },
+});
 
 const initStore = async (): Promise<SqliteStore> => {
   if (!storeInitPromise) {
     if (!app.isReady()) {
       throw new Error('Store accessed before app is ready.');
     }
+    const startedAt = nowMs();
     // better-sqlite3 opens the database synchronously, so Promise.resolve() resolves
     // immediately. The timeout acts as a safety net for future async changes or
     // unexpected OS-level blocking (e.g., file lock on startup).
@@ -777,7 +853,9 @@ const initStore = async (): Promise<SqliteStore> => {
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Store initialization timed out after 15s')), 15_000)
       ),
-    ]);
+    ]).finally(() => {
+      markTiming('db_init_ms', startedAt);
+    });
   }
   return storeInitPromise;
 };
@@ -1063,18 +1141,11 @@ const getCoworkFileActivityTracker = (): CoworkFileActivityTracker => {
     coworkFileActivityTracker = new CoworkFileActivityTracker((activity) => {
       updateDesktopPetTaskSnapshot(activity.sessionId, DesktopPetTaskStatus.Coding);
       const safeActivity = sanitizeCoworkFileActivityForIpc(activity);
-      const windows = BrowserWindow.getAllWindows();
-      windows.forEach((win) => {
-        if (win.isDestroyed()) return;
-        try {
-          win.webContents.send(CoworkIpcChannel.StreamFileActivity, {
-            sessionId: activity.sessionId,
-            activity: safeActivity,
-          });
-        } catch (error) {
-          console.error('[CoworkFileActivity] failed to forward file activity:', error);
-        }
-      });
+      const payload = {
+        sessionId: activity.sessionId,
+        activity: safeActivity,
+      };
+      sendCoworkStreamPayload(activity.sessionId, CoworkIpcChannel.StreamFileActivity, 'fileActivity', payload);
     });
   }
   return coworkFileActivityTracker;
@@ -1082,7 +1153,7 @@ const getCoworkFileActivityTracker = (): CoworkFileActivityTracker => {
 
 const startCoworkFileActivityForSession = (sessionId: string): void => {
   try {
-    const session = getCoworkStore().getSession(sessionId);
+    const session = getCoworkStore().getSessionMeta(sessionId);
     if (!session?.cwd) return;
     getCoworkFileActivityTracker().startSession(sessionId, session.cwd);
   } catch {
@@ -1894,7 +1965,7 @@ const bindCoworkRuntimeForwarder = (): void => {
     startCoworkFileActivityForSession(sessionId);
     updateDesktopPetTaskSnapshot(sessionId, getDesktopPetStatusForMessage(message));
     try {
-      const session = getCoworkStore().getSession(sessionId);
+      const session = getCoworkStore().getSessionMeta(sessionId);
       if (session?.cwd) {
         getCoworkFileActivityTracker().handleToolMessage(sessionId, session.cwd, message);
       }
@@ -1902,31 +1973,15 @@ const bindCoworkRuntimeForwarder = (): void => {
       // File activity is best-effort and must not block message rendering.
     }
     const safeMessage = sanitizeCoworkMessageForIpc(message);
-    const windows = BrowserWindow.getAllWindows();
-    console.log('[CoworkForwarder] forwarding message: sessionId=', sessionId, 'type=', message?.type, 'windowCount=', windows.length);
-    windows.forEach((win) => {
-      if (win.isDestroyed()) return;
-      try {
-        win.webContents.send('cowork:stream:message', { sessionId, message: safeMessage });
-      } catch (error) {
-        console.error('Failed to forward cowork message:', error);
-      }
-    });
+    const payload = { sessionId, message: safeMessage };
+    sendCoworkStreamPayload(sessionId, CoworkIpcChannel.StreamMessage, 'message', payload);
   });
 
   runtime.on('messageUpdate', (sessionId: string, messageId: string, content: string) => {
     startCoworkFileActivityForSession(sessionId);
     updateDesktopPetTaskSnapshot(sessionId, DesktopPetTaskStatus.Replying);
     const safeContent = truncateIpcString(content, IPC_UPDATE_CONTENT_MAX_CHARS);
-    const windows = BrowserWindow.getAllWindows();
-    windows.forEach((win) => {
-      if (win.isDestroyed()) return;
-      try {
-        win.webContents.send('cowork:stream:messageUpdate', { sessionId, messageId, content: safeContent });
-      } catch (error) {
-        console.error('Failed to forward cowork message update:', error);
-      }
-    });
+    messageUpdateCoalescer.append(sessionId, messageId, safeContent);
   });
 
   runtime.on('permissionRequest', (sessionId: string, request: any) => {
@@ -1935,25 +1990,17 @@ const bindCoworkRuntimeForwarder = (): void => {
       return;
     }
     const safeRequest = sanitizePermissionRequestForIpc(request);
-    const windows = BrowserWindow.getAllWindows();
-    windows.forEach((win) => {
-      if (win.isDestroyed()) return;
-      try {
-        win.webContents.send('cowork:stream:permission', { sessionId, request: safeRequest });
-      } catch (error) {
-        console.error('Failed to forward cowork permission request:', error);
-      }
-    });
+    const payload = { sessionId, request: safeRequest };
+    sendCoworkStreamPayload(sessionId, CoworkIpcChannel.StreamPermission, 'permission', payload, { fallbackToAll: true });
   });
 
   runtime.on('complete', (sessionId: string, claudeSessionId: string | null) => {
+    messageUpdateCoalescer.flushSession(sessionId, 'final');
+    messageUpdateCoalescer.clearSession(sessionId);
     getCoworkFileActivityTracker().stopSession(sessionId, 1200);
     updateDesktopPetTaskSnapshot(sessionId, DesktopPetTaskStatus.Completed);
-    const windows = BrowserWindow.getAllWindows();
-    windows.forEach((win) => {
-      if (win.isDestroyed()) return;
-      win.webContents.send('cowork:stream:complete', { sessionId, claudeSessionId });
-    });
+    const payload = { sessionId, claudeSessionId };
+    sendCoworkStreamPayload(sessionId, CoworkIpcChannel.StreamComplete, 'complete', payload, { fallbackToAll: true });
     // If session used a server model, notify renderer to refresh quota
     try {
       const apiConfig = resolveCurrentApiConfig();
@@ -1970,18 +2017,19 @@ const bindCoworkRuntimeForwarder = (): void => {
   });
 
   runtime.on('error', (sessionId: string, error: string) => {
+    messageUpdateCoalescer.flushSession(sessionId, 'final');
+    messageUpdateCoalescer.clearSession(sessionId);
     getCoworkFileActivityTracker().stopSession(sessionId, 1200);
     updateDesktopPetTaskSnapshot(sessionId, DesktopPetTaskStatus.Error);
     // Mark session as error in store so the .catch() fallback can detect duplicates.
     try { getCoworkStore().updateSession(sessionId, { status: 'error' }); } catch { /* ignore */ }
-    const windows = BrowserWindow.getAllWindows();
-    windows.forEach((win) => {
-      if (win.isDestroyed()) return;
-      win.webContents.send('cowork:stream:error', { sessionId, error });
-    });
+    const payload = { sessionId, error };
+    sendCoworkStreamPayload(sessionId, CoworkIpcChannel.StreamError, 'error', payload, { fallbackToAll: true });
   });
 
   runtime.on('sessionStopped', (sessionId: string) => {
+    messageUpdateCoalescer.flushSession(sessionId, 'final');
+    messageUpdateCoalescer.clearSession(sessionId);
     getCoworkFileActivityTracker().stopSession(sessionId);
     updateDesktopPetTaskSnapshot(sessionId, DesktopPetTaskStatus.Stopped);
   });
@@ -1991,30 +2039,29 @@ const bindCoworkRuntimeForwarder = (): void => {
 
 const broadcastCoworkMessage = (sessionId: string, message: CoworkMessage): void => {
   const safeMessage = sanitizeCoworkMessageForIpc(message);
-  BrowserWindow.getAllWindows().forEach((win) => {
-    if (win.isDestroyed()) return;
-    try {
-      win.webContents.send('cowork:stream:message', { sessionId, message: safeMessage });
-    } catch (error) {
-      console.error('[CoworkForwarder] failed to broadcast manual message:', error);
-    }
-  });
+  sendCoworkStreamPayload(sessionId, CoworkIpcChannel.StreamMessage, 'message', { sessionId, message: safeMessage });
   broadcastCoworkSessionsChanged();
 };
 
 const broadcastCoworkComplete = (sessionId: string): void => {
-  BrowserWindow.getAllWindows().forEach((win) => {
-    if (win.isDestroyed()) return;
-    win.webContents.send('cowork:stream:complete', { sessionId, claudeSessionId: null });
-  });
+  sendCoworkStreamPayload(
+    sessionId,
+    CoworkIpcChannel.StreamComplete,
+    'complete',
+    { sessionId, claudeSessionId: null },
+    { fallbackToAll: true },
+  );
   broadcastCoworkSessionsChanged();
 };
 
 const broadcastCoworkError = (sessionId: string, error: string): void => {
-  BrowserWindow.getAllWindows().forEach((win) => {
-    if (win.isDestroyed()) return;
-    win.webContents.send('cowork:stream:error', { sessionId, error });
-  });
+  sendCoworkStreamPayload(
+    sessionId,
+    CoworkIpcChannel.StreamError,
+    'error',
+    { sessionId, error },
+    { fallbackToAll: true },
+  );
   broadcastCoworkSessionsChanged();
 };
 
@@ -2165,6 +2212,7 @@ const startMcpBridge = (): Promise<McpBridgeConfig | null> => {
   if (mcpBridgeStartPromise) {
     return mcpBridgeStartPromise;
   }
+  const mcpStartedAt = nowMs();
   mcpBridgeStartPromise = (async (): Promise<McpBridgeConfig | null> => {
   try {
     console.log('[McpBridge] startMcpBridge called');
@@ -2208,7 +2256,7 @@ const startMcpBridge = (): Promise<McpBridgeConfig | null> => {
       windows.forEach((win) => {
         if (win.isDestroyed()) return;
         try {
-          win.webContents.send('cowork:stream:permission', {
+          win.webContents.send(CoworkIpcChannel.StreamPermission, {
             sessionId: '__askuser__',
             request: {
               requestId: request.requestId,
@@ -2229,7 +2277,7 @@ const startMcpBridge = (): Promise<McpBridgeConfig | null> => {
       windows.forEach((win) => {
         if (win.isDestroyed()) return;
         try {
-          win.webContents.send('cowork:stream:permissionDismiss', { requestId });
+          win.webContents.send(CoworkIpcChannel.StreamPermissionDismiss, { requestId });
         } catch {
           // ignore
         }
@@ -2250,6 +2298,7 @@ const startMcpBridge = (): Promise<McpBridgeConfig | null> => {
     return null;
   }
   })().finally(() => {
+    markTiming('mcp_ready_ms', mcpStartedAt);
     mcpBridgeStartPromise = null;
   });
   return mcpBridgeStartPromise;
@@ -2738,7 +2787,7 @@ const getDesktopPetTaskActivityText = (status: DesktopPetTaskStatus): string => 
   }
 };
 
-const getDesktopPetTaskSource = (session: CoworkSession): DesktopPetTaskSnapshot['source'] => {
+const getDesktopPetTaskSource = (session: CoworkSessionMeta): DesktopPetTaskSnapshot['source'] => {
   if (/^\[[^\]]+\]\s/.test(session.title)) {
     return DesktopPetTaskSource.Im;
   }
@@ -2765,7 +2814,7 @@ const updateDesktopPetTaskSnapshot = (sessionId: string, status: DesktopPetTaskS
     return;
   }
 
-  const session = getCoworkStore().getSession(sessionId);
+  const session = getCoworkStore().getSessionMeta(sessionId);
   if (!session) {
     return;
   }
@@ -3296,6 +3345,14 @@ if (!gotTheLock) {
           ...getRecentMainLogEntries(),
           { archiveName: 'cowork.log', filePath: getCoworkLogPath() },
         ],
+        bufferEntries: [{
+          archiveName: 'performance-snapshot.json',
+          buffer: Buffer.from(JSON.stringify(getPerformanceSnapshot({
+            appVersion: app.getVersion(),
+            platform: process.platform,
+            arch: process.arch,
+          }), null, 2), 'utf8'),
+        }],
       });
 
       return {
@@ -4110,7 +4167,29 @@ if (!gotTheLock) {
   });
 
   // Cowork IPC handlers
-  ipcMain.handle('cowork:session:start', async (_event, options: {
+  ipcMain.handle(CoworkIpcChannel.SessionSubscribe, async (event, input: { sessionId?: string } | string) => {
+    const sessionId = typeof input === 'string' ? input : input?.sessionId;
+    if (!sessionId) {
+      return { success: false, error: 'Session id is required.' };
+    }
+    subscribeSenderToCoworkSession(event.sender, sessionId);
+    return { success: true };
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionUnsubscribe, async (event, input: { sessionId?: string } | string) => {
+    const sessionId = typeof input === 'string' ? input : input?.sessionId;
+    if (!sessionId) {
+      return { success: false, error: 'Session id is required.' };
+    }
+    sessionSubscriptions.unsubscribe(sessionId, event.sender.id);
+    return { success: true };
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionSubscriptionsDebug, async () => {
+    return { success: true, subscriptions: sessionSubscriptions.getSnapshot() };
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionStart, async (event, options: {
     prompt: string;
     cwd?: string;
     systemPrompt?: string;
@@ -4170,6 +4249,7 @@ if (!gotTheLock) {
         }
           : { runtimeSnapshot },
       );
+      subscribeSenderToCoworkSession(event.sender, session.id);
 
       // Update session status to 'running' before starting async task
       // This ensures the frontend receives the correct status immediately
@@ -4199,15 +4279,19 @@ if (!gotTheLock) {
           runtimeSource: RuntimeCallSource.Chat,
         }).catch(error => {
           console.error('[AgentTeamRunner] team session failed:', error);
-          const existing = coworkStoreInstance.getSession(session.id);
+          const existing = coworkStoreInstance.getSessionMeta(session.id);
           if (existing?.status === 'error') return;
           const errorMessage = error instanceof Error ? error.message : String(error);
           updateDesktopPetTaskSnapshot(session.id, DesktopPetTaskStatus.Error);
           broadcastCoworkError(session.id, errorMessage);
         });
-        const sessionWithMessages = coworkStoreInstance.getSession(session.id) || {
+        const sessionMeta = coworkStoreInstance.getSessionMeta(session.id) || {
           ...session,
           status: 'running' as const,
+        };
+        const sessionWithMessages = {
+          ...sessionMeta,
+          messages: coworkStoreInstance.getRecentMessages(session.id, 120),
         };
         return { success: true, session: sessionWithMessages };
       }
@@ -4234,20 +4318,26 @@ if (!gotTheLock) {
         // The engine router already emits an 'error' event (handled at line ~990)
         // which sends cowork:stream:error to the renderer. Only send here if the
         // session hasn't been marked as error yet, to avoid duplicate messages.
-        const existing = coworkStoreInstance.getSession(session.id);
+        const existing = coworkStoreInstance.getSessionMeta(session.id);
         if (existing?.status === 'error') return;
         const errorMessage = error instanceof Error ? error.message : String(error);
         updateDesktopPetTaskSnapshot(session.id, DesktopPetTaskStatus.Error);
-        const windows = BrowserWindow.getAllWindows();
-        windows.forEach((win) => {
-          if (win.isDestroyed()) return;
-          win.webContents.send('cowork:stream:error', { sessionId: session.id, error: errorMessage });
-        });
+        sendCoworkStreamPayload(
+          session.id,
+          CoworkIpcChannel.StreamError,
+          'error',
+          { sessionId: session.id, error: errorMessage },
+          { fallbackToAll: true },
+        );
       });
 
-      const sessionWithMessages = coworkStoreInstance.getSession(session.id) || {
+      const sessionMeta = coworkStoreInstance.getSessionMeta(session.id) || {
         ...session,
         status: 'running' as const,
+      };
+      const sessionWithMessages = {
+        ...sessionMeta,
+        messages: coworkStoreInstance.getRecentMessages(session.id, 120),
       };
       return { success: true, session: sessionWithMessages };
     } catch (error) {
@@ -4258,7 +4348,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:continue', async (_event, options: {
+  ipcMain.handle(CoworkIpcChannel.SessionContinue, async (event, options: {
     sessionId: string;
     prompt: string;
     systemPrompt?: string;
@@ -4266,7 +4356,8 @@ if (!gotTheLock) {
     imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }>;
   }) => {
     try {
-      const existingSession = getCoworkStore().getSession(options.sessionId);
+      subscribeSenderToCoworkSession(event.sender, options.sessionId);
+      const existingSession = getCoworkStore().getSessionMeta(options.sessionId);
       const inferredEngine = existingSession?.teamId
         ? resolveCoworkAgentEngine()
         : resolveAgentRuntimeEngine(existingSession?.agentId || 'main');
@@ -4306,13 +4397,16 @@ if (!gotTheLock) {
           runtimeSource: RuntimeCallSource.Chat,
         }).catch(error => {
           console.error('[AgentTeamRunner] team continue failed:', error);
-          const existing = getCoworkStore().getSession(options.sessionId);
+          const existing = getCoworkStore().getSessionMeta(options.sessionId);
           if (existing?.status === 'error') return;
           const errorMessage = error instanceof Error ? error.message : String(error);
           updateDesktopPetTaskSnapshot(options.sessionId, DesktopPetTaskStatus.Error);
           broadcastCoworkError(options.sessionId, errorMessage);
         });
-        const session = getCoworkStore().getSession(options.sessionId);
+        const sessionMeta = getCoworkStore().getSessionMeta(options.sessionId);
+        const session = sessionMeta
+          ? { ...sessionMeta, messages: getCoworkStore().getRecentMessages(options.sessionId, 120) }
+          : null;
         return { success: true, session };
       }
       runtime.continueSession(options.sessionId, options.prompt, {
@@ -4330,18 +4424,23 @@ if (!gotTheLock) {
         // The engine router already emits an 'error' event (handled at line ~990)
         // which sends cowork:stream:error to the renderer. Only send here if the
         // session hasn't been marked as error yet, to avoid duplicate messages.
-        const existing = getCoworkStore().getSession(options.sessionId);
+        const existing = getCoworkStore().getSessionMeta(options.sessionId);
         if (existing?.status === 'error') return;
         const errorMessage = error instanceof Error ? error.message : String(error);
         updateDesktopPetTaskSnapshot(options.sessionId, DesktopPetTaskStatus.Error);
-        const windows = BrowserWindow.getAllWindows();
-        windows.forEach((win) => {
-          if (win.isDestroyed()) return;
-          win.webContents.send('cowork:stream:error', { sessionId: options.sessionId, error: errorMessage });
-        });
+        sendCoworkStreamPayload(
+          options.sessionId,
+          CoworkIpcChannel.StreamError,
+          'error',
+          { sessionId: options.sessionId, error: errorMessage },
+          { fallbackToAll: true },
+        );
       });
 
-      const session = getCoworkStore().getSession(options.sessionId);
+      const sessionMeta = getCoworkStore().getSessionMeta(options.sessionId);
+      const session = sessionMeta
+        ? { ...sessionMeta, messages: getCoworkStore().getRecentMessages(options.sessionId, 120) }
+        : null;
       return { success: true, session };
     } catch (error) {
       return {
@@ -4351,7 +4450,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:stop', async (_event, sessionId: string) => {
+  ipcMain.handle(CoworkIpcChannel.SessionStop, async (_event, sessionId: string) => {
     try {
       const runtime = getCoworkEngineRouter();
       runtime.stopSession(sessionId);
@@ -4457,7 +4556,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:get', async (_event, sessionId: string) => {
+  ipcMain.handle(CoworkIpcChannel.SessionGet, async (_event, sessionId: string) => {
     try {
       const session = getCoworkStore().getSession(sessionId);
       return { success: true, session };
@@ -4465,6 +4564,66 @@ if (!gotTheLock) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get session',
+      };
+    }
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionGetMeta, async (_event, sessionId: string) => {
+    try {
+      const session = getCoworkStore().getSessionMeta(sessionId);
+      return { success: true, session };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get session metadata',
+      };
+    }
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionGetRecentMessages, async (_event, input: { sessionId: string; limit?: number }) => {
+    try {
+      const messages = getCoworkStore().getRecentMessages(input.sessionId, input.limit);
+      return { success: true, messages };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get recent messages',
+      };
+    }
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionGetMessagesAfter, async (_event, input: { sessionId: string; sequence: number }) => {
+    try {
+      const messages = getCoworkStore().getMessagesAfter(input.sessionId, input.sequence);
+      return { success: true, messages };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get messages after sequence',
+      };
+    }
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionGetMessagesBefore, async (_event, input: { sessionId: string; sequence: number; limit?: number }) => {
+    try {
+      const messages = getCoworkStore().getMessagesBefore(input.sessionId, input.sequence, input.limit);
+      return { success: true, messages };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get messages before sequence',
+      };
+    }
+  });
+
+  ipcMain.handle(CoworkIpcChannel.SessionGetRuntimeSnapshot, async (_event, sessionId: string) => {
+    try {
+      const runtimeSnapshot = getCoworkStore().getSessionRuntimeSnapshot(sessionId);
+      return { success: true, runtimeSnapshot };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get session runtime snapshot',
       };
     }
   });
@@ -4482,7 +4641,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:list', async (_event, agentId?: string) => {
+  ipcMain.handle(CoworkIpcChannel.SessionList, async (_event, agentId?: string) => {
     try {
       const sessions = getCoworkStore().listSessions(agentId);
       return { success: true, sessions };
@@ -4964,6 +5123,36 @@ if (!gotTheLock) {
       };
     }
   });
+
+  ipcMain.handle(CoworkIpcChannel.PerformanceRendererReady, async (_event, input: {
+    firstPaintMs?: unknown;
+    firstInteractiveMs?: unknown;
+    configLoadedMs?: unknown;
+    recentSessionsLoadedMs?: unknown;
+  }) => {
+    const firstPaintMs = Number(input?.firstPaintMs);
+    if (Number.isFinite(firstPaintMs) && firstPaintMs >= 0) {
+      markTimingValue('first_paint_ms', firstPaintMs);
+    }
+    const firstInteractiveMs = Number(input?.firstInteractiveMs);
+    if (Number.isFinite(firstInteractiveMs) && firstInteractiveMs >= 0) {
+      markTimingValue('first_interactive_ms', firstInteractiveMs);
+    }
+    const configLoadedMs = Number(input?.configLoadedMs);
+    if (Number.isFinite(configLoadedMs) && configLoadedMs >= 0) {
+      markTimingValue('config_loaded_ms', configLoadedMs);
+    }
+    const recentSessionsLoadedMs = Number(input?.recentSessionsLoadedMs);
+    if (Number.isFinite(recentSessionsLoadedMs) && recentSessionsLoadedMs >= 0) {
+      markTimingValue('recent_sessions_loaded_ms', recentSessionsLoadedMs);
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle(CoworkIpcChannel.StartupServicesStatus, async () => ({
+    success: true,
+    services: getStartupServicesSnapshot(),
+  }));
 
   ipcMain.handle(CoworkIpcChannel.StudioAssetsEnsure, async () => {
     return ensureCoworkStudioAssets();
@@ -6960,6 +7149,7 @@ if (!gotTheLock) {
 
   // 创建主窗口
   const createWindow = () => {
+    const windowCreateStartedAt = nowMs();
     // 如果窗口已经存在，就不再创建新窗口
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -7018,6 +7208,7 @@ if (!gotTheLock) {
 
     // 禁用窗口菜单
     mainWindow.setMenu(null);
+    markTiming('window_created_ms', windowCreateStartedAt);
 
     // 处理 window.open 请求（企微 SDK 授权弹窗等）
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -7067,6 +7258,7 @@ if (!gotTheLock) {
       clearTimeout(loadTimeout);
     });
     mainWindow.webContents.on('did-finish-load', () => {
+      markTiming('window_did_finish_load_ms', windowCreateStartedAt);
       emitWindowState();
       if (openClawEngineManager && !mainWindow?.isDestroyed()) {
         mainWindow.webContents.send('openclaw:engine:onProgress', openClawEngineManager.getStatus());
@@ -7149,6 +7341,7 @@ if (!gotTheLock) {
 
     // 等待内容加载完成后再显示窗口
     mainWindow.once('ready-to-show', () => {
+      markTiming('window_ready_to_show_ms', windowCreateStartedAt);
       emitWindowState();
       // 开机自启时不显示窗口，仅显示托盘图标
       if (!isAutoLaunched()) {
@@ -7292,10 +7485,116 @@ if (!gotTheLock) {
   process.once('SIGINT', () => handleTerminationSignal('SIGINT'));
   process.once('SIGTERM', () => handleTerminationSignal('SIGTERM'));
 
+  type StartupServiceStatus = 'pending' | 'running' | 'ready' | 'error' | 'degraded';
+  type StartupServiceName =
+    | 'session_recovery'
+    | 'runtime_call_recovery'
+    | 'token_proxy'
+    | 'enterprise_sync'
+    | 'runtime_forwarders'
+    | 'openclaw_config_sync'
+    | 'hermes_config_sync'
+    | 'selected_engine'
+    | 'scheduled_tasks'
+    | 'skills'
+    | 'python_runtime'
+    | 'skill_services'
+    | 'app_config'
+    | 'openai_compat_proxy'
+    | 'im_gateways';
+
+  type StartupServiceState = {
+    name: StartupServiceName;
+    status: StartupServiceStatus;
+    startedAt?: number;
+    finishedAt?: number;
+    durationMs?: number;
+    error?: string;
+  };
+
+  const startupServiceStates = new Map<StartupServiceName, StartupServiceState>();
+  const startupServiceNames: StartupServiceName[] = [
+    'session_recovery',
+    'runtime_call_recovery',
+    'token_proxy',
+    'enterprise_sync',
+    'runtime_forwarders',
+    'openclaw_config_sync',
+    'hermes_config_sync',
+    'selected_engine',
+    'scheduled_tasks',
+    'skills',
+    'python_runtime',
+    'skill_services',
+    'app_config',
+    'openai_compat_proxy',
+    'im_gateways',
+  ];
+
+  for (const name of startupServiceNames) {
+    startupServiceStates.set(name, { name, status: 'pending' });
+  }
+
+  const getStartupServicesSnapshot = (): StartupServiceState[] =>
+    startupServiceNames.map(name => startupServiceStates.get(name) ?? { name, status: 'pending' });
+
+  const broadcastStartupServicesStatus = (): void => {
+    const snapshot = getStartupServicesSnapshot();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      win.webContents.send(CoworkIpcChannel.StartupServicesChanged, snapshot);
+    }
+  };
+
+  const setStartupServiceStatus = (
+    name: StartupServiceName,
+    status: StartupServiceStatus,
+    input: { startedAt?: number; error?: string } = {},
+  ): void => {
+    const existing = startupServiceStates.get(name) ?? { name, status: 'pending' };
+    const finishedAt = status === 'ready' || status === 'error' || status === 'degraded'
+      ? Date.now()
+      : existing.finishedAt;
+    const startedAt = input.startedAt ?? existing.startedAt ?? (status === 'running' ? Date.now() : undefined);
+    startupServiceStates.set(name, {
+      ...existing,
+      status,
+      startedAt,
+      finishedAt,
+      durationMs: startedAt && finishedAt ? finishedAt - startedAt : existing.durationMs,
+      error: input.error,
+    });
+    broadcastStartupServicesStatus();
+  };
+
+  const runStartupService = async (
+    name: StartupServiceName,
+    task: () => Promise<void> | void,
+    options: { degradedOnError?: boolean } = {},
+  ): Promise<void> => {
+    const startedAt = Date.now();
+    setStartupServiceStatus(name, 'running', { startedAt });
+    try {
+      await task();
+      setStartupServiceStatus(name, 'ready', { startedAt });
+    } catch (error) {
+      setStartupServiceStatus(name, options.degradedOnError ? 'degraded' : 'error', {
+        startedAt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (options.degradedOnError) {
+        console.warn(`[Startup] service ${name} degraded during background startup:`, error);
+        return;
+      }
+      console.error(`[Startup] service ${name} failed during background startup:`, error);
+    }
+  };
+
   // 初始化应用
   const initApp = async () => {
     console.log('[Main] initApp: waiting for app.whenReady()');
     await app.whenReady();
+    markTiming('app_ready_ms');
     console.log('[Main] initApp: app is ready');
 
     // Note: Calendar permission is checked on-demand when calendar operations are requested
@@ -7320,18 +7619,52 @@ if (!gotTheLock) {
     store = await initStore();
     console.log('[Main] initApp: store initialized');
     refreshEndpointsTestMode(store);
+    setContentSecurityPolicy();
+    bindCoworkRuntimeForwarder();
+    bindOpenClawStatusForwarder();
+
+    console.log('[Main] initApp: creating window');
+    createWindow();
+    markTiming('t0_ready_ms');
+    console.log('[Main] initApp: window created');
+    applyDesktopPetConfigFromStore();
+
+    // Windows/Linux cold start: parse deep link from process.argv
+    // Always buffer since renderer is not ready yet after createWindow().
+    const coldStartDeepLink = process.argv.find(arg => arg.startsWith('wesight://'));
+    if (coldStartDeepLink) {
+      try {
+        const parsed = new URL(coldStartDeepLink);
+        if (parsed.hostname === 'auth' && parsed.pathname === '/callback') {
+          const code = parsed.searchParams.get('code');
+          if (code) {
+            pendingAuthCode = code;
+          }
+        }
+      } catch (e) {
+        console.error('[Main] Failed to parse cold-start deep link:', e);
+      }
+    }
 
     // Defensive recovery: app may be force-closed during execution and leave
-    // stale running flags in DB. Normalize them on startup.
-    const resetCount = getCoworkStore().resetRunningSessions();
-    console.log('[Main] initApp: resetRunningSessions done, count:', resetCount);
-    if (resetCount > 0) {
-      console.log(`[Main] Reset ${resetCount} stuck cowork session(s) from running -> idle`);
-    }
-    const resetRuntimeCallCount = getRuntimeTelemetryStore().resetRunningCalls();
-    if (resetRuntimeCallCount > 0) {
-      console.log(`[Main] Reset ${resetRuntimeCallCount} stale runtime call(s) from running -> stopped`);
-    }
+    // stale running flags in DB. Normalize them after the shell is created.
+    await runStartupService('session_recovery', () => {
+      const recoveryStartedAt = nowMs();
+      const resetCount = getCoworkStore().resetRunningSessions();
+      markTiming('session_recovery_ms', recoveryStartedAt);
+      console.log('[Main] initApp: resetRunningSessions done, count:', resetCount);
+      if (resetCount > 0) {
+        console.log(`[Main] Reset ${resetCount} stuck cowork session(s) from running -> idle`);
+      }
+    }, { degradedOnError: true });
+    await runStartupService('runtime_call_recovery', () => {
+      const recoveryStartedAt = nowMs();
+      const resetRuntimeCallCount = getRuntimeTelemetryStore().resetRunningCalls();
+      markTiming('runtime_call_recovery_ms', recoveryStartedAt);
+      if (resetRuntimeCallCount > 0) {
+        console.log(`[Main] Reset ${resetRuntimeCallCount} stale runtime call(s) from running -> stopped`);
+      }
+    }, { degradedOnError: true });
     // Inject store getter into claudeSettings
     setStoreGetter(() => store);
     // Inject auth getters for wesight-server provider routing
@@ -7444,24 +7777,26 @@ if (!gotTheLock) {
       }
     });
 
+    markTiming('t1_ready_ms');
+
+    void (async () => {
+
     // Start the lightweight token proxy before OpenClaw config sync so that
     // wesight-server provider can use the proxy URL in its config.
-    try {
+    await runStartupService('token_proxy', async () => {
       await startOpenClawTokenProxy({
         getAuthTokens,
         refreshToken: refreshOnce,
         getServerBaseUrl: getServerApiBaseUrl,
       });
       console.log('[Main] OpenClaw token proxy started');
-    } catch (err) {
-      console.warn('[Main] OpenClaw token proxy failed to start (non-fatal):', err);
-    }
+    }, { degradedOnError: true });
 
     // Enterprise config sync — must run before openclawConfigSync
     // so enterprise data is in SQLite when the config is generated.
-    const enterpriseConfigPath = resolveEnterpriseConfigPath();
-    if (enterpriseConfigPath) {
-      try {
+    await runStartupService('enterprise_sync', () => {
+      const enterpriseConfigPath = resolveEnterpriseConfigPath();
+      if (enterpriseConfigPath) {
         const imStoreInstance = getIMGatewayManager().getIMStore();
         const mcpStoreInstance = getMcpStore();
         syncEnterpriseConfig(
@@ -7505,111 +7840,107 @@ if (!gotTheLock) {
             return cs.getConfig().workingDirectory;
           },
         );
-      } catch (error) {
-        console.error('[Enterprise] config sync failed:', error);
-      }
-    } else {
-      // No enterprise config package found — clear any previously stored config
-      // so the app exits enterprise mode after the package is removed.
-      const hadEnterprise = store.get('enterprise_config');
-      if (hadEnterprise) {
-        store.delete('enterprise_config');
-        // Reset executionMode to default so sandbox mode reverts to "off".
-        const cs = getCoworkStore();
-        cs.setConfig({ executionMode: 'local' });
-        console.log('[Enterprise] config package removed, cleared enterprise mode and reset executionMode');
-      }
-    }
-
-    bindCoworkRuntimeForwarder();
-    bindOpenClawStatusForwarder();
-
-    const startupSync = await syncOpenClawConfig({
-      reason: 'startup',
-      restartGatewayIfRunning: false,
-    });
-    if (!startupSync.success) {
-      console.error('[OpenClaw] Startup config sync failed:', startupSync.error);
-    }
-    const hermesStartupSync = getHermesConfigSync().sync('startup');
-    if (!hermesStartupSync.success) {
-      console.error('[Hermes] Startup config sync failed:', hermesStartupSync.error);
-    }
-    if (isOpenClawCoworkAgentEngine(resolveCoworkAgentEngine())) {
-      void ensureOpenClawRunningForCowork().then(() => {
-        // Start cron polling once the gateway is confirmed running.
-        try {
-          getCronJobService().startPolling();
-        } catch (err) {
-          console.warn('[Main] CronJobService not available after OpenClaw startup:', err);
+      } else {
+        // No enterprise config package found — clear any previously stored config
+        // so the app exits enterprise mode after the package is removed.
+        const hadEnterprise = store.get('enterprise_config');
+        if (hadEnterprise) {
+          store.delete('enterprise_config');
+          // Reset executionMode to default so sandbox mode reverts to "off".
+          const cs = getCoworkStore();
+          cs.setConfig({ executionMode: 'local' });
+          console.log('[Enterprise] config package removed, cleared enterprise mode and reset executionMode');
         }
-      }).catch((error) => {
-        console.error('[OpenClaw] Failed to auto-start gateway on app startup:', error);
+      }
+    }, { degradedOnError: true });
+
+    await runStartupService('runtime_forwarders', () => {
+      bindCoworkRuntimeForwarder();
+      bindOpenClawStatusForwarder();
+    }, { degradedOnError: true });
+
+    await runStartupService('openclaw_config_sync', async () => {
+      const startupSync = await syncOpenClawConfig({
+        reason: 'startup',
+        restartGatewayIfRunning: false,
       });
-    }
+      if (!startupSync.success) {
+        throw new Error(startupSync.error || 'OpenClaw config sync failed.');
+      }
+    }, { degradedOnError: true });
+    await runStartupService('hermes_config_sync', () => {
+      const hermesStartupSync = getHermesConfigSync().sync('startup');
+      if (!hermesStartupSync.success) {
+        throw new Error(hermesStartupSync.error || 'Hermes config sync failed.');
+      }
+    }, { degradedOnError: true });
+    await runStartupService('selected_engine', async () => {
+      const selectedEngineDetectStartedAt = nowMs();
+      const selectedEngine = resolveCoworkAgentEngine();
+      markTiming('selected_engine_detect_ms', selectedEngineDetectStartedAt);
+      if (isOpenClawCoworkAgentEngine(selectedEngine)) {
+        await ensureOpenClawRunningForCowork();
+      }
+      markTiming('selected_engine_ready_ms', selectedEngineDetectStartedAt);
+    }, { degradedOnError: true });
+
+    await runStartupService('scheduled_tasks', () => {
+      getCronJobService().startPolling();
+    }, { degradedOnError: true });
 
     console.log('[Main] initApp: setStoreGetter done');
-    const manager = getSkillManager();
-    console.log('[Main] initApp: getSkillManager done');
+    const skillsStartedAt = nowMs();
+    await runStartupService('skills', () => {
+      const manager = getSkillManager();
+      console.log('[Main] initApp: getSkillManager done');
 
-    // When skills change (install/enable/disable/delete), re-sync AGENTS.md
-    // so OpenClaw's IM channel agents pick up the latest skill list.
-    manager.onSkillsChanged(() => {
-      syncOpenClawConfig({ reason: 'skills-changed' }).catch((error) => {
-        console.warn('[Main] Failed to sync OpenClaw config after skills change:', error);
+      // When skills change (install/enable/disable/delete), re-sync AGENTS.md
+      // so OpenClaw's IM channel agents pick up the latest skill list.
+      manager.onSkillsChanged(() => {
+        syncOpenClawConfig({ reason: 'skills-changed' }).catch((error) => {
+          console.warn('[Main] Failed to sync OpenClaw config after skills change:', error);
+        });
       });
-    });
 
-    // Non-critical: sync bundled skills to user data.
-    // Wrapped in try-catch so a failure here does not block window creation.
-    try {
+      // Non-critical: sync bundled skills to user data.
       manager.syncBundledSkillsToUserData();
       console.log('[Main] initApp: syncBundledSkillsToUserData done');
-    } catch (error) {
-      console.error('[Main] initApp: syncBundledSkillsToUserData failed:', error);
-    }
 
-    try {
       manager.recoverInterruptedUpgrades();
       console.log('[Main] initApp: recoverInterruptedUpgrades done');
-    } catch (error) {
-      console.error('[Main] initApp: recoverInterruptedUpgrades failed:', error);
-    }
 
-    try {
-      const runtimeResult = await ensurePythonRuntimeReady();
-      if (!runtimeResult.success) {
-        console.error('[Main] initApp: ensurePythonRuntimeReady failed:', runtimeResult.error);
-      } else {
-        console.log('[Main] initApp: ensurePythonRuntimeReady done');
-      }
-    } catch (error) {
-      console.error('[Main] initApp: ensurePythonRuntimeReady threw:', error);
-    }
-
-    try {
       manager.startWatching();
       console.log('[Main] initApp: startWatching done');
-    } catch (error) {
-      console.error('[Main] initApp: startWatching failed:', error);
-    }
+    }, { degradedOnError: true });
+
+    await runStartupService('python_runtime', async () => {
+      const runtimeResult = await ensurePythonRuntimeReady();
+      if (!runtimeResult.success) {
+        throw new Error(runtimeResult.error || 'Python runtime preparation failed.');
+      }
+      console.log('[Main] initApp: ensurePythonRuntimeReady done');
+    }, { degradedOnError: true });
 
     // Start skill services (non-critical)
-    try {
+    await runStartupService('skill_services', async () => {
       const skillServices = getSkillServiceManager();
       console.log('[Main] initApp: getSkillServiceManager done');
       await skillServices.startAll();
       console.log('[Main] initApp: skill services started');
-    } catch (error) {
-      console.error('[Main] initApp: skill services failed:', error);
-    }
-
-    const appConfig = getStore().get<AppConfigSettings>('app_config');
-    await applyProxyPreference(getUseSystemProxyFromConfig(appConfig));
-
-    await startCoworkOpenAICompatProxy().catch((error) => {
-      console.error('Failed to start OpenAI compatibility proxy:', error);
+    }, { degradedOnError: true }).finally(() => {
+      markTiming('skills_ready_ms', skillsStartedAt);
     });
+
+    await runStartupService('app_config', async () => {
+      const configLoadStartedAt = nowMs();
+      const appConfig = getStore().get<AppConfigSettings>('app_config');
+      markTiming('config_loaded_ms', configLoadStartedAt);
+      await applyProxyPreference(getUseSystemProxyFromConfig(appConfig));
+    }, { degradedOnError: true });
+
+    await runStartupService('openai_compat_proxy', async () => {
+      await startCoworkOpenAICompatProxy();
+    }, { degradedOnError: true });
 
     // Re-sync OpenClaw config after proxy is ready so that providers that route
     // through the proxy (e.g. github-copilot) get the correct baseUrl.
@@ -7622,43 +7953,20 @@ if (!gotTheLock) {
       }
     }
 
-    // 设置安全策略
-    setContentSecurityPolicy();
-
-    // 创建窗口
-    console.log('[Main] initApp: creating window');
-    createWindow();
-    console.log('[Main] initApp: window created');
-    applyDesktopPetConfigFromStore();
-
-    // Windows/Linux cold start: parse deep link from process.argv
-    // Always buffer since renderer is not ready yet after createWindow()
-    const coldStartDeepLink = process.argv.find(arg => arg.startsWith('wesight://'));
-    if (coldStartDeepLink) {
-      try {
-        const parsed = new URL(coldStartDeepLink);
-        if (parsed.hostname === 'auth' && parsed.pathname === '/callback') {
-          const code = parsed.searchParams.get('code');
-          if (code) {
-            pendingAuthCode = code;
-          }
-        }
-      } catch (e) {
-        console.error('[Main] Failed to parse cold-start deep link:', e);
+    // Auto-reconnect IM bots that were enabled before restart.
+    await runStartupService('im_gateways', async () => {
+      const imStartedAt = nowMs();
+      await getIMGatewayManager().startAllEnabled();
+      markTiming('im_ready_ms', imStartedAt);
+      if (resolveFeishuIMAgentEngine() === CoworkAgentEngineValue.Hermes) {
+        startHermesIMSessionSyncPolling();
+        void syncHermesIMSessionsToCowork('startup');
       }
-    }
-
-    // Auto-reconnect IM bots that were enabled before restart
-    getIMGatewayManager().startAllEnabled()
-      .then(() => {
-        if (resolveFeishuIMAgentEngine() === CoworkAgentEngineValue.Hermes) {
-          startHermesIMSessionSyncPolling();
-          void syncHermesIMSessionsToCowork('startup');
-        }
-      })
-      .catch((error) => {
-        console.error('[IM] Failed to auto-start enabled gateways:', error);
-      });
+    }, { degradedOnError: true });
+    markTiming('t2_ready_ms');
+    })().catch((error) => {
+      console.error('[Startup] background services failed:', error);
+    });
 
     // Reconnect OpenClaw gateway WS after system wake from sleep/suspend
     powerMonitor.on('resume', () => {

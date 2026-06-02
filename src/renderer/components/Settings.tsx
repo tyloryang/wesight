@@ -50,6 +50,7 @@ import type {
   OpenClawEngineStatus,
   OpenCodePermissionMode,
   QwenCodePermissionMode,
+  StartupServiceState,
 } from '../types/cowork';
 import AgentsView from './agent/AgentsView';
 import Modal from './common/Modal';
@@ -838,6 +839,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   const [bootstrapLoaded, setBootstrapLoaded] = useState<boolean>(false);
   const [openClawEngineStatus, setOpenClawEngineStatus] = useState<OpenClawEngineStatus | null>(null);
   const [hermesEngineStatus, setHermesEngineStatus] = useState<HermesEngineStatus | null>(null);
+  const [startupServices, setStartupServices] = useState<StartupServiceState[]>([]);
   const [agentEnvironmentSnapshot, setAgentEnvironmentSnapshot] = useState<ExternalAgentEnvironmentSnapshot | null>(null);
   const [codexAppStarting, setCodexAppStarting] = useState(false);
   const [openclawConfigSource, setOpenClawConfigSource] = useState<ExternalAgentConfigSource>(
@@ -999,6 +1001,22 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     if (!selectedExternalAgentAppType) return;
     void loadAgentProviders(selectedExternalAgentAppType);
   }, [loadAgentProviders, selectedExternalAgentAppType]);
+
+  useEffect(() => {
+    let active = true;
+    void coworkService.getStartupServicesStatus().then((services) => {
+      if (!active) return;
+      setStartupServices(services);
+    });
+    const unsubscribe = coworkService.onStartupServicesChanged((services) => {
+      if (!active) return;
+      setStartupServices(services);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -4119,6 +4137,17 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     );
   };
 
+  const resolveStartupServiceStatusClass = (status: StartupServiceState['status']): string => {
+    if (status === 'ready') return 'bg-green-500';
+    if (status === 'running') return 'bg-blue-500';
+    if (status === 'degraded') return 'bg-amber-500';
+    if (status === 'error') return 'bg-red-500';
+    return 'bg-gray-400';
+  };
+
+  const resolveStartupServiceStatusText = (status: StartupServiceState['status']): string =>
+    i18nService.t(`startupServiceStatus_${status}`);
+
   const renderTabContent = () => {
     switch(activeTab) {
       case 'general':
@@ -4157,6 +4186,40 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                 <span className="text-xs text-secondary">
                   {language === 'zh' ? i18nService.t('chinese') : i18nService.t('english')}
                 </span>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-surface-raised/40 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">
+                    {i18nService.t('startupServicesTitle')}
+                  </h4>
+                  <p className="mt-1 text-xs text-secondary">
+                    {i18nService.t('startupServicesHint')}
+                  </p>
+                </div>
+                <span className="rounded-full border border-border px-2 py-0.5 text-xs text-secondary">
+                  {startupServices.filter(service => service.status === 'ready').length}/{startupServices.length}
+                </span>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {startupServices.map((service) => (
+                  <div
+                    key={service.name}
+                    className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${resolveStartupServiceStatusClass(service.status)}`} />
+                      <span className="truncate text-xs font-medium text-foreground">
+                        {i18nService.t(`startupService_${service.name}`)}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-xs text-secondary">
+                      {resolveStartupServiceStatusText(service.status)}
+                    </span>
+                  </div>
+                ))}
               </div>
             </section>
 

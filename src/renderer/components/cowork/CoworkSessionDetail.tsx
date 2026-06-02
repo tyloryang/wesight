@@ -1758,11 +1758,15 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<CoworkPromptInputRef>(null);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const [hasOlderMessages, setHasOlderMessages] = useState(true);
+  const olderMessagesLoadingRef = useRef(false);
 
   // Clear lazy-render height cache when session changes
   const sessionId = currentSession?.id;
   useEffect(() => {
     clearHeightCache();
+    setHasOlderMessages(true);
+    olderMessagesLoadingRef.current = false;
   }, [sessionId]);
 
   // Rail navigation states
@@ -2340,6 +2344,37 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     setShowConfirmDelete(false);
   };
 
+  const loadOlderMessagesFromTop = useCallback(async () => {
+    const container = scrollContainerRef.current;
+    const session = currentSession;
+    if (!container || !session || olderMessagesLoadingRef.current || !hasOlderMessages) return;
+    const firstMessage = session.messages[0];
+    const beforeSequence = firstMessage?.sequence ?? firstMessage?.timestamp;
+    if (typeof beforeSequence !== 'number' || beforeSequence <= 1) {
+      setHasOlderMessages(false);
+      return;
+    }
+
+    olderMessagesLoadingRef.current = true;
+    const previousScrollHeight = container.scrollHeight;
+    try {
+      const loaded = await coworkService.loadOlderMessages(session.id, beforeSequence, 100);
+      if (loaded.length < 100) {
+        setHasOlderMessages(false);
+      }
+      window.requestAnimationFrame(() => {
+        const nextContainer = scrollContainerRef.current;
+        if (nextContainer) {
+          nextContainer.scrollTop += nextContainer.scrollHeight - previousScrollHeight;
+        }
+        olderMessagesLoadingRef.current = false;
+      });
+    } catch (error) {
+      console.debug('[CoworkSessionDetail] failed to load older messages:', error);
+      olderMessagesLoadingRef.current = false;
+    }
+  }, [currentSession, hasOlderMessages]);
+
   const handleMessagesScroll = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -2350,6 +2385,9 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     // Check if content overflows the container (use functional updater to avoid redundant re-renders)
     const scrollable = container.scrollHeight > container.clientHeight;
     setIsScrollable((prev) => (prev === scrollable ? prev : scrollable));
+    if (container.scrollTop <= 80) {
+      void loadOlderMessagesFromTop();
+    }
     if (!scrollable) return;
 
     // Skip index recalculation during programmatic navigation
@@ -2401,7 +2439,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
       currentRailIndexRef.current = railIdx;
       setCurrentRailIndex(railIdx);
     }
-  }, []);
+  }, [loadOlderMessagesFromTop]);
 
   const navigateToRailItem = useCallback((railIndex: number) => {
     if (railIndex < 0 || railIndex >= railItemCountRef.current) return;

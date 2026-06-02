@@ -37,6 +37,17 @@ export type { CoworkAgentEngine, ExternalAgentConfigSource };
 export type { CoworkSessionKind };
 export type { ClaudeCodePermissionMode, DeepSeekTuiPermissionMode, OpenCodePermissionMode, QwenCodePermissionMode };
 
+export type StartupServiceStatus = 'pending' | 'running' | 'ready' | 'error' | 'degraded';
+
+export interface StartupServiceState {
+  name: string;
+  status: StartupServiceStatus;
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  error?: string;
+}
+
 // Cowork message metadata
 export interface CoworkMessageMetadata {
   toolName?: string;
@@ -59,11 +70,11 @@ export interface CoworkMessage {
   type: CoworkMessageType;
   content: string;
   timestamp: number;
+  sequence?: number | null;
   metadata?: CoworkMessageMetadata;
 }
 
-// Cowork session
-export interface CoworkSession {
+export interface CoworkSessionMeta {
   id: string;
   title: string;
   claudeSessionId: string | null;
@@ -79,9 +90,13 @@ export interface CoworkSession {
   parentSessionId?: string | null;
   teamId?: string | null;
   runtimeSnapshot?: CoworkSessionRuntimeSnapshot | null;
-  messages: CoworkMessage[];
   createdAt: number;
   updatedAt: number;
+}
+
+// Cowork session
+export interface CoworkSession extends CoworkSessionMeta {
+  messages: CoworkMessage[];
 }
 
 // Cowork configuration
@@ -248,6 +263,18 @@ export interface CoworkContinueOptions {
 export interface CoworkSessionResult {
   success: boolean;
   session?: CoworkSession;
+  error?: string;
+}
+
+export interface CoworkSessionMetaResult {
+  success: boolean;
+  session?: CoworkSessionMeta;
+  error?: string;
+}
+
+export interface CoworkMessagesResult {
+  success: boolean;
+  messages?: CoworkMessage[];
   error?: string;
 }
 

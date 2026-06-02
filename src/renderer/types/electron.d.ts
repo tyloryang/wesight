@@ -35,8 +35,7 @@ interface ApiStreamResponse {
   error?: string;
 }
 
-// Cowork types for IPC
-interface CoworkSession {
+interface CoworkSessionMeta {
   id: string;
   title: string;
   claudeSessionId: string | null;
@@ -52,9 +51,13 @@ interface CoworkSession {
   parentSessionId?: string | null;
   teamId?: string | null;
   runtimeSnapshot?: CoworkSessionRuntimeSnapshot | null;
-  messages: CoworkMessage[];
   createdAt: number;
   updatedAt: number;
+}
+
+// Cowork types for IPC
+interface CoworkSession extends CoworkSessionMeta {
+  messages: CoworkMessage[];
 }
 
 interface CoworkMessage {
@@ -62,6 +65,7 @@ interface CoworkMessage {
   type: 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'system';
   content: string;
   timestamp: number;
+  sequence?: number | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -78,6 +82,17 @@ interface CoworkSessionSummary {
   runtimeSnapshot?: CoworkSessionRuntimeSnapshot | null;
   createdAt: number;
   updatedAt: number;
+}
+
+type StartupServiceStatus = 'pending' | 'running' | 'ready' | 'error' | 'degraded';
+
+interface StartupServiceState {
+  name: string;
+  status: StartupServiceStatus;
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  error?: string;
 }
 
 interface CoworkConfig {
@@ -646,6 +661,11 @@ interface IElectronAPI {
     setSessionPinned: (options: { sessionId: string; pinned: boolean }) => Promise<{ success: boolean; error?: string }>;
     renameSession: (options: { sessionId: string; title: string }) => Promise<{ success: boolean; error?: string }>;
     getSession: (sessionId: string) => Promise<{ success: boolean; session?: CoworkSession; error?: string }>;
+    getSessionMeta: (sessionId: string) => Promise<{ success: boolean; session?: CoworkSessionMeta; error?: string }>;
+    getRecentMessages: (input: { sessionId: string; limit?: number }) => Promise<{ success: boolean; messages?: CoworkMessage[]; error?: string }>;
+    getMessagesAfter: (input: { sessionId: string; sequence: number }) => Promise<{ success: boolean; messages?: CoworkMessage[]; error?: string }>;
+    getMessagesBefore: (input: { sessionId: string; sequence: number; limit?: number }) => Promise<{ success: boolean; messages?: CoworkMessage[]; error?: string }>;
+    getSessionRuntimeSnapshot: (sessionId: string) => Promise<{ success: boolean; runtimeSnapshot?: CoworkSessionRuntimeSnapshot | null; error?: string }>;
     remoteManaged: (sessionId: string) => Promise<{ success: boolean; remoteManaged: boolean; error?: string }>;
     listSessions: (agentId?: string) => Promise<{ success: boolean; sessions?: CoworkSessionSummary[]; error?: string }>;
     exportResultImage: (options: {
@@ -672,6 +692,14 @@ interface IElectronAPI {
     getRuntimeMetricsSummary: (filters: RuntimeMetricsFilters) => Promise<{ success: boolean; summary?: RuntimeMetricsSummary; error?: string }>;
     listRuntimeCalls: (filters: RuntimeMetricsFilters) => Promise<{ success: boolean; total?: number; calls?: RuntimeCallRecord[]; error?: string }>;
     getRuntimeCallDetail: (callId: string) => Promise<{ success: boolean; call?: RuntimeCallRecord | null; error?: string }>;
+    reportRendererReady: (input: {
+      firstPaintMs?: number;
+      firstInteractiveMs?: number;
+      configLoadedMs?: number;
+      recentSessionsLoadedMs?: number;
+    }) => Promise<{ success: boolean }>;
+    getStartupServicesStatus: () => Promise<{ success: boolean; services?: StartupServiceState[]; error?: string }>;
+    onStartupServicesChanged: (callback: (services: StartupServiceState[]) => void) => () => void;
     ensureStudioAssets: () => Promise<CoworkStudioAssetsResult>;
     installAgentCli: (appType: ExternalAgentProviderAppType) => Promise<ExternalAgentCliInstallResult>;
     listAgentProviders: (appType: ExternalAgentProviderAppType) => Promise<ExternalAgentProviderListResult>;
@@ -702,7 +730,17 @@ interface IElectronAPI {
     readBootstrapFile: (filename: string) => Promise<{ success: boolean; content: string; error?: string }>;
     writeBootstrapFile: (filename: string, content: string) => Promise<{ success: boolean; error?: string }>;
     onStreamMessage: (callback: (data: { sessionId: string; message: CoworkMessage }) => void) => () => void;
-    onStreamMessageUpdate: (callback: (data: { sessionId: string; messageId: string; content: string }) => void) => () => void;
+    subscribeSession: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
+    unsubscribeSession: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
+    onStreamMessageUpdate: (callback: (data: {
+      sessionId: string;
+      messageId: string;
+      content: string;
+      mode?: 'snapshot' | 'delta' | 'final';
+      offset?: number;
+      sequence?: number;
+      finalLength?: number;
+    }) => void) => () => void;
     onStreamFileActivity: (callback: (data: { sessionId: string; activity: CoworkFileActivity }) => void) => () => void;
     onStreamPermission: (callback: (data: { sessionId: string; request: CoworkPermissionRequest }) => void) => () => void;
     onStreamPermissionDismiss: (callback: (data: { requestId: string }) => void) => () => void;
