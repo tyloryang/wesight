@@ -105,7 +105,7 @@ Terminal-native coding agents are powerful, while their setup, model routing, pe
 
 | Sponsor | Description |
 | ------- | ----------- |
-| [PPToken](https://pptoken.cc/) | Project sponsor. PPToken provides API relay and key distribution for ChatGPT, Claude, Gemini and other mainstream AI models, with low latency, high availability, pay-as-you-go billing, and flexible subscription plans. |
+| <a href="https://pptoken.cc/"><img src="public/readme/sponsors/pptoken.png" alt="PPToken" width="240"></a> | Project sponsor. PPToken provides API relay and key distribution for ChatGPT, Claude, Gemini and other mainstream AI models, with low latency, high availability, pay-as-you-go billing, and flexible subscription plans. |
 
 ## Agent Engines
 
