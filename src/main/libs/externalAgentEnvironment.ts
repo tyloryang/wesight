@@ -8,6 +8,7 @@ import {
   type CliCoworkAgentEngine,
   CoworkAgentEngine,
 } from '../../shared/cowork/constants';
+import { resolveUserShellPath } from './coworkUtil';
 import {
   listDeepSeekTuiModelProviders,
   parseDeepSeekTuiConfigText,
@@ -22,7 +23,6 @@ import {
   parseHermesDotenvText,
 } from './hermesConfig';
 import { readOpenClawGlobalConfig, summarizeOpenClawConfig } from './openclawSystemRuntime';
-import { resolveUserShellPath } from './coworkUtil';
 
 export type CliAppType = 'claude' | 'codex' | 'hermes' | 'openclaw' | 'opencode' | 'grok' | 'qwen' | 'deepseek_tui';
 
