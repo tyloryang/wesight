@@ -99,6 +99,14 @@ WeSight 是一个开源桌面 AI Agent 控制台。它可以安装或复用 Clau
 - **记忆和个性化**：从对话中提取偏好和长期信息，跨会话延续上下文。
 - **桌面宠物和工作室**：用轻量桌面宠物和像素风工作室跟随活跃任务。
 
+## ❤️ 赞助商
+
+> [想出现在这里？](public/readme/community/wechat-personal.jpg) 添加微信时请备注你的产品名和项目赞助说明。
+
+| 赞助商 | 介绍 |
+| ------ | ---- |
+| [PPToken](https://pptoken.cc/) | 项目赞助。PPToken 提供 ChatGPT、Claude、Gemini 等主流 AI 模型 API 中转与密钥分发服务，支持低延迟、高可用、按量计费与订阅套餐灵活选择。 |
+
 ## Agent 引擎
 
 | 引擎         | 适合场景                                        | 准备方式                                     |

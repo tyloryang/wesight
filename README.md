@@ -99,6 +99,14 @@ Terminal-native coding agents are powerful, while their setup, model routing, pe
 - **Memory and personalization** - Extract useful preferences from conversations and reuse them across future sessions.
 - **Desktop pet and studio** - Keep a lightweight desktop companion and a pixel-style studio view for active tasks.
 
+## ❤️ Sponsors
+
+> [Want to appear here?](public/readme/community/wechat-personal.jpg) Add me on WeChat and include your product name plus a short project sponsorship note in the friend request.
+
+| Sponsor | Description |
+| ------- | ----------- |
+| [PPToken](https://pptoken.cc/) | Project sponsor. PPToken provides API relay and key distribution for ChatGPT, Claude, Gemini and other mainstream AI models, with low latency, high availability, pay-as-you-go billing, and flexible subscription plans. |
+
 ## Agent Engines
 
 | Engine           | Best For                                                    | Setup Path                                      |
