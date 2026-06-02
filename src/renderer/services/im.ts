@@ -306,9 +306,9 @@ class IMService {
   /**
    * Fetch the OpenClaw config schema (JSON Schema + uiHints) from the gateway.
    */
-  async getOpenClawConfigSchema(): Promise<{ schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> } | null> {
+  async getOpenClawConfigSchema(options?: { allowRuntimeStart?: boolean }): Promise<{ schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> } | null> {
     try {
-      const result = await window.electron.im.getOpenClawConfigSchema();
+      const result = await window.electron.im.getOpenClawConfigSchema(options);
       if (result.success && result.result) {
         return result.result;
       }

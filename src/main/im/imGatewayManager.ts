@@ -53,6 +53,7 @@ import {
 } from './types';
 const CONNECTIVITY_TIMEOUT_MS = 10_000;
 const INBOUND_ACTIVITY_WARN_AFTER_MS = 2 * 60 * 1000;
+const OPENCLAW_SCHEMA_FAILURE_COOLDOWN_MS = 60_000;
 
 type GatewayClientLike = {
   request: <T = Record<string, unknown>>(
@@ -143,6 +144,8 @@ export class IMGatewayManager extends EventEmitter {
   private ensureHermesGatewayReady: (() => Promise<void>) | null = null;
   private getOpenClawGatewayClient: (() => GatewayClientLike | null) | null = null;
   private ensureOpenClawGatewayReady: (() => Promise<void>) | null = null;
+  private openClawConfigSchemaCache: { schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> } | null = null;
+  private openClawConfigSchemaFailureUntil = 0;
   private getOpenClawSessionKeysForCoworkSession: ((sessionId: string) => string[]) | null = null;
   private createScheduledTask:
     | ((params: {
@@ -2873,21 +2876,40 @@ export class IMGatewayManager extends EventEmitter {
    * Fetch the OpenClaw config schema (JSON Schema + uiHints) from the gateway.
    * Returns { schema, uiHints } or null if the gateway is unavailable.
    */
-  async getOpenClawConfigSchema(): Promise<{ schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> } | null> {
+  async getOpenClawConfigSchema(options: { allowRuntimeStart?: boolean } = {}): Promise<{ schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> } | null> {
+    const now = Date.now();
+    if (now < this.openClawConfigSchemaFailureUntil) {
+      return this.openClawConfigSchemaCache;
+    }
+
+    const client = this.getOpenClawGatewayClient?.() ?? null;
+    if (!client && options.allowRuntimeStart !== true) {
+      return this.openClawConfigSchemaCache;
+    }
+
     try {
-      return await this.requestOpenClawGateway<{ schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> }>('config.schema', {});
+      const schema = await this.requestOpenClawGateway<{ schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> }>(
+        'config.schema',
+        {},
+        { allowRuntimeStart: options.allowRuntimeStart === true },
+      );
+      this.openClawConfigSchemaCache = schema;
+      this.openClawConfigSchemaFailureUntil = 0;
+      return schema;
     } catch (err: any) {
-      console.warn('[IMGatewayManager] Failed to fetch config.schema from OpenClaw gateway:', err.message);
-      return null;
+      this.openClawConfigSchemaFailureUntil = Date.now() + OPENCLAW_SCHEMA_FAILURE_COOLDOWN_MS;
+      console.debug('[IMGatewayManager] OpenClaw config schema is unavailable:', err);
+      return this.openClawConfigSchemaCache;
     }
   }
 
   private async requestOpenClawGateway<T = Record<string, unknown>>(
     method: string,
     params?: unknown,
+    options: { allowRuntimeStart?: boolean } = {},
   ): Promise<T> {
     let client = this.getOpenClawGatewayClient?.() ?? null;
-    if (!client) {
+    if (!client && options.allowRuntimeStart === true) {
       await this.ensureOpenClawGatewayReady?.();
       client = this.getOpenClawGatewayClient?.() ?? null;
     }

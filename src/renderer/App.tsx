@@ -270,6 +270,7 @@ const App: React.FC = () => {
     setSettingsOptions({
       initialTab: options?.initialTab,
       notice: options?.notice,
+      openedAtMs: performance.now(),
     });
     setShowSettings(true);
   }, []);
@@ -696,6 +697,7 @@ const App: React.FC = () => {
               onClose={handleCloseSettings}
               initialTab={settingsOptions.initialTab}
               notice={settingsOptions.notice}
+              openedAtMs={settingsOptions.openedAtMs}
               onUpdateFound={handleUpdateFound}
               enterpriseConfig={enterpriseConfig}
             />
@@ -776,6 +778,7 @@ const App: React.FC = () => {
           onClose={handleCloseSettings}
           initialTab={settingsOptions.initialTab}
           notice={settingsOptions.notice}
+          openedAtMs={settingsOptions.openedAtMs}
           onUpdateFound={handleUpdateFound}
           enterpriseConfig={enterpriseConfig}
         />

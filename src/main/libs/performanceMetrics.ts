@@ -21,6 +21,12 @@ export type PerformanceTimingName =
   | 't1_ready_ms'
   | 't2_ready_ms';
 
+export type SettingsMetricType =
+  | 'open'
+  | 'interactive'
+  | 'tabLoad'
+  | 'ipc';
+
 export type IpcMetricType =
   | 'message'
   | 'messageUpdate'
@@ -104,10 +110,31 @@ export interface PerformanceSnapshot {
       slowCount: number;
     }>;
   };
+  settings: {
+    totalEvents: number;
+    recentEvents: SettingsMetric[];
+    byType: Record<string, {
+      count: number;
+      totalDurationMs: number;
+      maxDurationMs: number;
+    }>;
+  };
+}
+
+export interface SettingsMetric {
+  type: SettingsMetricType;
+  durationMs: number;
+  recordedAt: number;
+  tab?: string;
+  channel?: string;
+  success?: boolean;
+  error?: string;
+  triggeredRuntimeStart?: boolean;
 }
 
 const DEFAULT_DB_SLOW_THRESHOLD_MS = 100;
 const MAX_SLOW_DB_OPERATIONS = 200;
+const MAX_SETTINGS_METRICS = 200;
 
 const processStartedAt = performance.now();
 const startupTimings: Partial<Record<PerformanceTimingName, number>> = {};
@@ -130,6 +157,12 @@ const dbByOperation = new Map<string, {
   slowCount: number;
 }>();
 const slowDbOperations: DbSlowOperation[] = [];
+const settingsMetrics: SettingsMetric[] = [];
+const settingsByType = new Map<string, {
+  count: number;
+  totalDurationMs: number;
+  maxDurationMs: number;
+}>();
 
 let totalIpcEvents = 0;
 let totalIpcPayloadBytes = 0;
@@ -137,6 +170,7 @@ let maxIpcPayloadBytes = 0;
 let maxMessageUpdatePayloadBytes = 0;
 let dbOperationCount = 0;
 let dbSlowThresholdMs = DEFAULT_DB_SLOW_THRESHOLD_MS;
+let settingsMetricCount = 0;
 
 export function nowMs(): number {
   return performance.now();
@@ -265,6 +299,34 @@ export function recordDbOperation(input: DbMetricInput): void {
   dbByOperation.set(input.operation, summary);
 }
 
+export function recordSettingsMetric(input: Omit<SettingsMetric, 'durationMs' | 'recordedAt'> & { durationMs?: number }): void {
+  settingsMetricCount += 1;
+  const metric: SettingsMetric = {
+    ...input,
+    durationMs: Math.max(0, Math.round(input.durationMs ?? 0)),
+    recordedAt: Date.now(),
+    error: input.error ? input.error.slice(0, 240) : undefined,
+  };
+  settingsMetrics.push(metric);
+  while (settingsMetrics.length > MAX_SETTINGS_METRICS) {
+    settingsMetrics.shift();
+  }
+
+  const summary = settingsByType.get(metric.type) ?? {
+    count: 0,
+    totalDurationMs: 0,
+    maxDurationMs: 0,
+  };
+  summary.count += 1;
+  summary.totalDurationMs += metric.durationMs;
+  summary.maxDurationMs = Math.max(summary.maxDurationMs, metric.durationMs);
+  settingsByType.set(metric.type, summary);
+
+  if (metric.durationMs >= 100) {
+    console.debug(`[Performance] settings ${metric.type} took ${metric.durationMs}ms.`);
+  }
+}
+
 export function measureDbOperation<T>(
   operation: DbMetricOperation,
   task: () => T,
@@ -296,12 +358,15 @@ export function resetPerformanceMetricsForTesting(): void {
   ipcSessions.clear();
   dbByOperation.clear();
   slowDbOperations.length = 0;
+  settingsMetrics.length = 0;
+  settingsByType.clear();
   totalIpcEvents = 0;
   totalIpcPayloadBytes = 0;
   maxIpcPayloadBytes = 0;
   maxMessageUpdatePayloadBytes = 0;
   dbOperationCount = 0;
   dbSlowThresholdMs = DEFAULT_DB_SLOW_THRESHOLD_MS;
+  settingsMetricCount = 0;
 }
 
 export function getPerformanceSnapshot(
@@ -328,6 +393,15 @@ export function getPerformanceSnapshot(
     maxEventsPerSecond: summary.maxEventsPerSecond,
   }));
 
+  const settingsByTypeSnapshot: PerformanceSnapshot['settings']['byType'] = {};
+  for (const [type, summary] of settingsByType.entries()) {
+    settingsByTypeSnapshot[type] = {
+      count: summary.count,
+      totalDurationMs: Math.round(summary.totalDurationMs),
+      maxDurationMs: Math.round(summary.maxDurationMs),
+    };
+  }
+
   return {
     sampledAt: new Date().toISOString(),
     uptimeMs: Math.round(performance.now() - processStartedAt),
@@ -346,6 +420,11 @@ export function getPerformanceSnapshot(
       slowThresholdMs: dbSlowThresholdMs,
       slowOperations: [...slowDbOperations],
       byOperation,
+    },
+    settings: {
+      totalEvents: settingsMetricCount,
+      recentEvents: [...settingsMetrics],
+      byType: settingsByTypeSnapshot,
     },
   };
 }

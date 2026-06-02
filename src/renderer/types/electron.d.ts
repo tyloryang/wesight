@@ -697,6 +697,15 @@ interface IElectronAPI {
       configLoadedMs?: number;
       recentSessionsLoadedMs?: number;
     }) => Promise<{ success: boolean }>;
+    reportSettingsMetric: (input: {
+      type: 'open' | 'interactive' | 'tabLoad' | 'ipc';
+      durationMs?: number;
+      tab?: string;
+      channel?: string;
+      success?: boolean;
+      error?: string;
+      triggeredRuntimeStart?: boolean;
+    }) => Promise<{ success: boolean }>;
     getStartupServicesStatus: () => Promise<{ success: boolean; services?: StartupServiceState[]; error?: string }>;
     onStartupServicesChanged: (callback: (services: StartupServiceState[]) => void) => () => void;
     ensureStudioAssets: () => Promise<CoworkStudioAssetsResult>;
@@ -801,7 +810,7 @@ interface IElectronAPI {
     ) => Promise<{ success: boolean; result?: IMConnectivityTestResult; error?: string }>;
     getStatus: () => Promise<{ success: boolean; status?: IMGatewayStatus; error?: string }>;
     getLocalIp: () => Promise<string>;
-    getOpenClawConfigSchema: () => Promise<{ success: boolean; result?: { schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> }; error?: string }>;
+    getOpenClawConfigSchema: (options?: { allowRuntimeStart?: boolean }) => Promise<{ success: boolean; result?: { schema: Record<string, unknown>; uiHints: Record<string, Record<string, unknown>> }; error?: string }>;
     weixinQrLoginStart: () => Promise<{ success: boolean; qrDataUrl?: string; message: string; sessionKey?: string }>;
     weixinQrLoginWait: (accountId?: string) => Promise<{ success: boolean; connected: boolean; message: string; accountId?: string }>;
     listPairingRequests: (platform: string) => Promise<{

@@ -173,6 +173,7 @@ export type SettingsOpenOptions = {
   notice?: string;
   noticeI18nKey?: string;
   noticeExtra?: string;
+  openedAtMs?: number;
 };
 
 interface SettingsProps extends SettingsOpenOptions {
@@ -617,7 +618,7 @@ const ShortcutRecorder: React.FC<{ value: string; onChange: (v: string) => void 
   );
 };
 
-const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, noticeI18nKey, noticeExtra, onUpdateFound, enterpriseConfig }) => {
+const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, noticeI18nKey, noticeExtra, openedAtMs, onUpdateFound, enterpriseConfig }) => {
   const dispatch = useDispatch();
   // 状态
   const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'general');
@@ -654,6 +655,10 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   const initialPetConfigRef = useRef<PetConfig>(DEFAULT_PET_CONFIG);
   const initialLanguageRef = useRef<LanguageType>(i18nService.getLanguage());
   const didSaveRef = useRef(false);
+  const openedAtRef = useRef(openedAtMs);
+  const reportedOpenRef = useRef(false);
+  const reportedTabsRef = useRef<Set<TabType>>(new Set());
+  const activeTabRef = useRef<TabType>(activeTab);
 
   // Add state for active provider
   const [activeProvider, setActiveProvider] = useState<ProviderType>(getDefaultActiveProvider());
@@ -713,6 +718,93 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   useEffect(() => {
     window.electron.appInfo.getVersion().then(setAppVersion);
   }, []);
+
+  const reportSettingsMetric = useCallback((input: {
+    type: 'open' | 'interactive' | 'tabLoad' | 'ipc';
+    durationMs?: number;
+    tab?: string;
+    channel?: string;
+    success?: boolean;
+    error?: string;
+    triggeredRuntimeStart?: boolean;
+  }) => {
+    window.electron?.cowork?.reportSettingsMetric?.(input).catch((metricError) => {
+      console.debug('[Settings] failed to report settings performance metric:', metricError);
+    });
+  }, []);
+
+  const measureSettingsIpc = useCallback(async <T,>(
+    channel: string,
+    task: () => Promise<T>,
+    options: { triggeredRuntimeStart?: boolean } = {},
+  ): Promise<T> => {
+    const startedAt = performance.now();
+    try {
+      const result = await task();
+      reportSettingsMetric({
+        type: 'ipc',
+        channel,
+        durationMs: Math.round(performance.now() - startedAt),
+        tab: activeTabRef.current,
+        success: true,
+        triggeredRuntimeStart: options.triggeredRuntimeStart === true,
+      });
+      return result;
+    } catch (error) {
+      reportSettingsMetric({
+        type: 'ipc',
+        channel,
+        durationMs: Math.round(performance.now() - startedAt),
+        tab: activeTabRef.current,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        triggeredRuntimeStart: options.triggeredRuntimeStart === true,
+      });
+      throw error;
+    }
+  }, [reportSettingsMetric]);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (reportedOpenRef.current) return;
+    reportedOpenRef.current = true;
+    const openedAt = openedAtRef.current;
+    if (typeof openedAt !== 'number') return;
+    const openDurationMs = Math.round(performance.now() - openedAt);
+    reportSettingsMetric({
+      type: 'open',
+      durationMs: openDurationMs,
+      tab: activeTab,
+      success: true,
+    });
+    const frameId = window.requestAnimationFrame(() => {
+      reportSettingsMetric({
+        type: 'interactive',
+        durationMs: Math.round(performance.now() - openedAt),
+        tab: activeTab,
+        success: true,
+      });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeTab, reportSettingsMetric]);
+
+  useEffect(() => {
+    if (reportedTabsRef.current.has(activeTab)) return;
+    reportedTabsRef.current.add(activeTab);
+    const startedAt = performance.now();
+    const frameId = window.requestAnimationFrame(() => {
+      reportSettingsMetric({
+        type: 'tabLoad',
+        durationMs: Math.round(performance.now() - startedAt),
+        tab: activeTab,
+        success: true,
+      });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeTab, reportSettingsMetric]);
 
   useEffect(() => {
     setShowApiKey(false);
@@ -946,15 +1038,16 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   }, []);
 
   useEffect(() => {
+    if (activeTab !== 'coworkAgentEngine') return;
     let active = true;
-    void coworkService.getAgentEngineSnapshot().then((snapshot) => {
+    void measureSettingsIpc('cowork:agentEngine:snapshot', () => coworkService.getAgentEngineSnapshot()).then((snapshot) => {
       if (!active) return;
       setAgentEnvironmentSnapshot(snapshot);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [activeTab, measureSettingsIpc]);
 
   useEffect(() => {
     const unsubscribe = coworkService.onAgentCliInstallProgress((progress: ExternalAgentCliInstallProgress) => {
@@ -983,7 +1076,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   const loadAgentProviders = useCallback(async (appType: ExternalAgentProviderAppType) => {
     setAgentProviderLoadingAppType(appType);
     try {
-      const result = await coworkService.listAgentProviders(appType);
+      const result = await measureSettingsIpc(`cowork:agentProviders:list:${appType}`, () => coworkService.listAgentProviders(appType));
       if (result.success) {
         setAgentProviderLists((prev) => ({
           ...prev,
@@ -994,16 +1087,17 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     } finally {
       setAgentProviderLoadingAppType((current) => (current === appType ? null : current));
     }
-  }, []);
+  }, [measureSettingsIpc]);
 
   useEffect(() => {
-    if (!selectedExternalAgentAppType) return;
+    if (activeTab !== 'coworkAgentEngine' || !selectedExternalAgentAppType) return;
     void loadAgentProviders(selectedExternalAgentAppType);
-  }, [loadAgentProviders, selectedExternalAgentAppType]);
+  }, [activeTab, loadAgentProviders, selectedExternalAgentAppType]);
 
   useEffect(() => {
+    if (activeTab !== 'general') return;
     let active = true;
-    void coworkService.getStartupServicesStatus().then((services) => {
+    void measureSettingsIpc('cowork:startupServices:status', () => coworkService.getStartupServicesStatus()).then((services) => {
       if (!active) return;
       setStartupServices(services);
     });
@@ -1015,11 +1109,12 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [activeTab, measureSettingsIpc]);
 
   useEffect(() => {
+    if (activeTab !== 'coworkAgentEngine') return;
     let active = true;
-    void coworkService.getOpenClawEngineStatus().then((status) => {
+    void measureSettingsIpc('openclaw:engine:status', () => coworkService.getOpenClawEngineStatus()).then((status) => {
       if (!active || !status) return;
       setOpenClawEngineStatus(status);
     });
@@ -1031,11 +1126,12 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [activeTab, measureSettingsIpc]);
 
   useEffect(() => {
+    if (activeTab !== 'coworkAgentEngine') return;
     let active = true;
-    void coworkService.getHermesEngineStatus().then((status) => {
+    void measureSettingsIpc('hermes:engine:status', () => coworkService.getHermesEngineStatus()).then((status) => {
       if (!active || !status) return;
       setHermesEngineStatus(status);
     });
@@ -1047,7 +1143,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [activeTab, measureSettingsIpc]);
 
   useEffect(() => {
     try {
@@ -1069,14 +1165,14 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
       if (savedTestMode) setTestModeUnlocked(true);
 
       // Load auto-launch setting
-      window.electron.autoLaunch.get().then(({ enabled }) => {
+      measureSettingsIpc('autoLaunch:get', () => window.electron.autoLaunch.get()).then(({ enabled }) => {
         setAutoLaunchState(enabled);
       }).catch(err => {
         console.error('Failed to load auto-launch setting:', err);
       });
 
       // Load prevent-sleep setting
-      window.electron.preventSleep.get().then(({ enabled }) => {
+      measureSettingsIpc('preventSleep:get', () => window.electron.preventSleep.get()).then(({ enabled }) => {
         setPreventSleepState(enabled);
       }).catch(err => {
         console.error('Failed to load prevent-sleep setting:', err);
@@ -1273,10 +1369,10 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
           ...config.shortcuts,
         }));
       }
-    } catch (error) {
+    } catch {
       setError('Failed to load settings');
     }
-  }, []);
+  }, [measureSettingsIpc]);
 
   useEffect(() => {
     return () => {

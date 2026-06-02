@@ -6,6 +6,7 @@ import {
   markTimingValue,
   recordDbOperation,
   recordIpcSend,
+  recordSettingsMetric,
   resetPerformanceMetricsForTesting,
   setDbSlowThresholdForTesting,
 } from './performanceMetrics';
@@ -84,4 +85,43 @@ test('keeps a bounded slow DB operation ring buffer', () => {
   expect(warnSpy).toHaveBeenCalled();
 
   warnSpy.mockRestore();
+});
+
+test('aggregates settings performance metrics', () => {
+  resetPerformanceMetricsForTesting();
+
+  recordSettingsMetric({
+    type: 'open',
+    durationMs: 42,
+    tab: 'general',
+    success: true,
+  });
+  recordSettingsMetric({
+    type: 'ipc',
+    durationMs: 125,
+    tab: 'im',
+    channel: 'im:openclaw:config-schema',
+    success: false,
+    error: 'OpenClaw CLI was not found',
+    triggeredRuntimeStart: false,
+  });
+
+  const snapshot = getPerformanceSnapshot();
+  expect(snapshot.settings.totalEvents).toBe(2);
+  expect(snapshot.settings.byType.open).toMatchObject({
+    count: 1,
+    totalDurationMs: 42,
+    maxDurationMs: 42,
+  });
+  expect(snapshot.settings.byType.ipc).toMatchObject({
+    count: 1,
+    totalDurationMs: 125,
+    maxDurationMs: 125,
+  });
+  expect(snapshot.settings.recentEvents[1]).toMatchObject({
+    type: 'ipc',
+    channel: 'im:openclaw:config-schema',
+    success: false,
+    triggeredRuntimeStart: false,
+  });
 });

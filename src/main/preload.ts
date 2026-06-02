@@ -365,6 +365,16 @@ contextBridge.exposeInMainWorld('electron', {
       recentSessionsLoadedMs?: number;
     }) =>
       ipcRenderer.invoke(CoworkIpcChannel.PerformanceRendererReady, input),
+    reportSettingsMetric: (input: {
+      type: 'open' | 'interactive' | 'tabLoad' | 'ipc';
+      durationMs?: number;
+      tab?: string;
+      channel?: string;
+      success?: boolean;
+      error?: string;
+      triggeredRuntimeStart?: boolean;
+    }) =>
+      ipcRenderer.invoke(CoworkIpcChannel.PerformanceSettingsMetric, input),
     getStartupServicesStatus: () =>
       ipcRenderer.invoke(CoworkIpcChannel.StartupServicesStatus),
     onStartupServicesChanged: (callback: (services: Array<{
@@ -576,7 +586,8 @@ contextBridge.exposeInMainWorld('electron', {
     getStatus: () => ipcRenderer.invoke('im:status:get'),
     getLocalIp: () => ipcRenderer.invoke('im:getLocalIp') as Promise<string>,
     // OpenClaw config schema
-    getOpenClawConfigSchema: () => ipcRenderer.invoke('im:openclaw:config-schema'),
+    getOpenClawConfigSchema: (options?: { allowRuntimeStart?: boolean }) =>
+      ipcRenderer.invoke('im:openclaw:config-schema', options),
 
 
     // Weixin QR login

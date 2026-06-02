@@ -167,6 +167,7 @@ import {
   markTimingValue,
   nowMs,
   recordIpcSend,
+  recordSettingsMetric,
 } from './libs/performanceMetrics';
 import { ensurePythonRuntimeReady } from './libs/pythonRuntime';
 import {
@@ -5148,6 +5149,32 @@ if (!gotTheLock) {
     return { success: true };
   });
 
+  ipcMain.handle(CoworkIpcChannel.PerformanceSettingsMetric, async (_event, input: {
+    type?: unknown;
+    durationMs?: unknown;
+    tab?: unknown;
+    channel?: unknown;
+    success?: unknown;
+    error?: unknown;
+    triggeredRuntimeStart?: unknown;
+  }) => {
+    const type = input?.type;
+    if (type !== 'open' && type !== 'interactive' && type !== 'tabLoad' && type !== 'ipc') {
+      return { success: false, error: 'Invalid settings metric type' };
+    }
+    const durationMs = Number(input.durationMs);
+    recordSettingsMetric({
+      type,
+      durationMs: Number.isFinite(durationMs) ? durationMs : 0,
+      tab: typeof input.tab === 'string' ? input.tab.slice(0, 80) : undefined,
+      channel: typeof input.channel === 'string' ? input.channel.slice(0, 120) : undefined,
+      success: typeof input.success === 'boolean' ? input.success : undefined,
+      error: typeof input.error === 'string' ? input.error : undefined,
+      triggeredRuntimeStart: input.triggeredRuntimeStart === true,
+    });
+    return { success: true };
+  });
+
   ipcMain.handle(CoworkIpcChannel.StartupServicesStatus, async () => ({
     success: true,
     services: getStartupServicesSnapshot(),
@@ -6077,11 +6104,28 @@ if (!gotTheLock) {
     }
     return '127.0.0.1';
   });
-  ipcMain.handle('im:openclaw:config-schema', async () => {
+  ipcMain.handle('im:openclaw:config-schema', async (_event, input?: { allowRuntimeStart?: boolean }) => {
+    const startedAt = nowMs();
+    const allowRuntimeStart = input?.allowRuntimeStart === true;
     try {
-      const result = await getIMGatewayManager().getOpenClawConfigSchema();
+      const result = await getIMGatewayManager().getOpenClawConfigSchema({ allowRuntimeStart });
+      recordSettingsMetric({
+        type: 'ipc',
+        channel: 'im:openclaw:config-schema',
+        durationMs: nowMs() - startedAt,
+        success: true,
+        triggeredRuntimeStart: allowRuntimeStart,
+      });
       return { success: true, result };
     } catch (error) {
+      recordSettingsMetric({
+        type: 'ipc',
+        channel: 'im:openclaw:config-schema',
+        durationMs: nowMs() - startedAt,
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get OpenClaw config schema',
+        triggeredRuntimeStart: allowRuntimeStart,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get OpenClaw config schema',
