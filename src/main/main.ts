@@ -63,7 +63,6 @@ import { CoworkFileActivityTracker } from './coworkFileActivityTracker';
 import { type CoworkMessage, type CoworkSessionMeta,CoworkStore } from './coworkStore';
 import { setLanguage, t } from './i18n';
 import { IMGatewayConfig,IMGatewayManager } from './im';
-import { formatApiFetchLogPayload } from './libs/apiFetchLogSanitizer';
 import {
   approvePairingCode,
   listPairingRequests,
@@ -87,6 +86,7 @@ import {
   HermesRuntimeAdapter,
   OpenClawRuntimeAdapter,
 } from './libs/agentEngine';
+import { formatApiFetchLogPayload } from './libs/apiFetchLogSanitizer';
 import { cancelActiveDownload,downloadUpdate, installUpdate } from './libs/appUpdateInstaller';
 import { clearServerModelMetadata,getCurrentApiConfig, resolveCurrentApiConfig, setAuthTokensGetter, setServerBaseUrlGetter, setStoreGetter, updateServerModelMetadata } from './libs/claudeSettings';
 import { CodexAppManager } from './libs/codexAppManager';
@@ -3346,14 +3346,20 @@ if (!gotTheLock) {
           ...getRecentMainLogEntries(),
           { archiveName: 'cowork.log', filePath: getCoworkLogPath() },
         ],
-        bufferEntries: [{
-          archiveName: 'performance-snapshot.json',
-          buffer: Buffer.from(JSON.stringify(getPerformanceSnapshot({
-            appVersion: app.getVersion(),
-            platform: process.platform,
-            arch: process.arch,
-          }), null, 2), 'utf8'),
-        }],
+        bufferEntries: [
+          {
+            archiveName: 'performance-snapshot.json',
+            buffer: Buffer.from(JSON.stringify(getPerformanceSnapshot({
+              appVersion: app.getVersion(),
+              platform: process.platform,
+              arch: process.arch,
+            }), null, 2), 'utf8'),
+          },
+          {
+            archiveName: 'event-timeline-summary.json',
+            buffer: Buffer.from(JSON.stringify(getCoworkStore().getEventTimelineSummary(200), null, 2), 'utf8'),
+          },
+        ],
       });
 
       return {
