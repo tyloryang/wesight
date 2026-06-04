@@ -1,9 +1,20 @@
 !include "FileFunc.nsh"
 
+!if "$%WESIGHT_ENABLE_DEFENDER_EXCLUSION%" == "1"
+  !define WESIGHT_ENABLE_DEFENDER_EXCLUSION
+!endif
+
 !macro customHeader
-  ; Hide the (empty) details list — electron-builder uses 7z solid extraction
-  ; which produces no per-file output, so the box would just be blank.
+  !ifdef WESIGHT_ENABLE_DEFENDER_EXCLUSION
+    ; Defender exclusion changes require elevation. Builds without the
+    ; WESIGHT_ENABLE_DEFENDER_EXCLUSION=1 opt-in keep the normal asInvoker flow.
+    RequestExecutionLevel admin
+  !endif
+
+  ; Keep the assisted installer focused on the normal progress bar. The
+  ; resource extraction is tracked in install-timing.log for diagnostics.
   ShowInstDetails nevershow
+  ShowUninstDetails show
 !macroend
 
 !macro customInit
@@ -57,8 +68,6 @@
   ; into a single tar file. NSIS 7z extracts one large file almost instantly;
   ; we then unpack the tar here using Electron's Node runtime.
 
-  SetDetailsPrint none
-
   System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")i'
 
   ${GetTime} "" "L" $3 $4 $5 $6 $7 $8 $9
@@ -79,14 +88,25 @@
 
   System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "")i'
 
+  ; ─── Windows Defender Exclusion (optional, build-time opt-in) ───
+  ; Enable with WESIGHT_ENABLE_DEFENDER_EXCLUSION=1 when producing a trusted
+  ; Windows build that should avoid real-time scanning of the bundled runtime.
+  ; The command remains best-effort because enterprise policy may disallow it.
+  !ifdef WESIGHT_ENABLE_DEFENDER_EXCLUSION
+    nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "try { Add-MpPreference -ExclusionPath $\"$INSTDIR\resources\cfmind$\" -ErrorAction Stop; Write-Output ok } catch { Write-Output skip }"'
+    Pop $0
+    Pop $1
+    FileWrite $2 "defender-exclusion-add: exit=$0 result=$1$\r$\n"
+  !else
+    FileWrite $2 "defender-exclusion-add: disabled$\r$\n"
+  !endif
+
   ; Clean up the unpack script — no longer needed after installation
   Delete "$INSTDIR\resources\unpack-cfmind.cjs"
 
   ${GetTime} "" "L" $3 $4 $5 $6 $7 $8 $9
   FileWrite $2 "install-done: $5-$4-$3 $6:$7:$8$\r$\n"
   FileClose $2
-
-  SetDetailsPrint both
 !macroend
 
 !macro customUnInit
@@ -110,4 +130,52 @@
 !macroend
 
 !macro customUnInstall
+  ; ─── Uninstall Cleanup Log ───
+  ; electron-builder removes app data after this macro, so write cleanup
+  ; diagnostics to %TEMP% where they survive the uninstall.
+  FileOpen $2 "$TEMP\WeSight-uninstall-cleanup.log" w
+
+  ${GetTime} "" "L" $3 $4 $5 $6 $7 $8 $9
+  FileWrite $2 "cleanup-start: $5-$4-$3 $6:$7:$8$\r$\n"
+  DetailPrint "[1/4] Starting WeSight uninstall cleanup..."
+
+  ; Remove the Defender exclusion if a previous trusted build added it. This
+  ; is intentionally best-effort so uninstall still succeeds on locked-down
+  ; machines or builds that never enabled the exclusion.
+  DetailPrint "[2/4] Removing optional Windows Defender exclusion..."
+  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "try { Remove-MpPreference -ExclusionPath $\"$INSTDIR\resources\cfmind$\" -ErrorAction SilentlyContinue; Write-Output ok } catch { Write-Output skip }"'
+  Pop $0
+  Pop $1
+  FileWrite $2 "defender-exclusion-remove: exit=$0 result=$1$\r$\n"
+  DetailPrint "[2/4] Defender cleanup result: $1"
+
+  ; Clear Windows auto-launch leftovers that point to this installation. The
+  ; app currently uses Electron login items, but this also handles future Task
+  ; Scheduler based builds without touching unrelated tasks.
+  DetailPrint "[3/4] Removing auto-launch entries for this installation..."
+  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "\
+    try {\
+      $$runPath = \"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run\";\
+      if (Test-Path $$runPath) {\
+        $$props = Get-ItemProperty $$runPath;\
+        $$props.PSObject.Properties | Where-Object { $$_.Name -notlike \"PS*\" -and ($$_.Value -like \"*$INSTDIR*\" -or $$_.Value -like \"*WeSight.exe*\") } | ForEach-Object { Remove-ItemProperty -Path $$runPath -Name $$_.Name -ErrorAction SilentlyContinue };\
+      }\
+      Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { ($$_.TaskName -like \"WeSight*\" -or $$_.TaskName -eq \"ai.wesight.app\") -and (($$_.Actions | Out-String) -like \"*$INSTDIR*\" -or ($$_.Actions | Out-String) -like \"*WeSight.exe*\") } | Unregister-ScheduledTask -Confirm:$$false -ErrorAction SilentlyContinue;\
+      Write-Output ok;\
+    } catch { Write-Output skip }"'
+  Pop $0
+  Pop $1
+  FileWrite $2 "auto-launch-cleanup: exit=$0 result=$1$\r$\n"
+  DetailPrint "[3/4] Auto-launch cleanup result: $1"
+
+  ; Remove leftover installer resource files if an interrupted install left
+  ; them behind. The main install directory is removed by electron-builder.
+  DetailPrint "[4/4] Removing leftover installer resource files..."
+  Delete "$INSTDIR\resources\win-resources.tar"
+  Delete "$INSTDIR\resources\unpack-cfmind.cjs"
+
+  ${GetTime} "" "L" $3 $4 $5 $6 $7 $8 $9
+  FileWrite $2 "cleanup-done: $5-$4-$3 $6:$7:$8$\r$\n"
+  FileClose $2
+  DetailPrint "WeSight uninstall cleanup completed."
 !macroend
