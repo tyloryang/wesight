@@ -31,6 +31,7 @@ WeSight is an open-source desktop control console for local AI agents. It helps 
 - Screenshots: [Screenshots](#screenshots)
 - Core features: [Core Features](#core-features)
 - Agent engines: [Agent Engines](#agent-engines)
+- Product roadmap: [Product Roadmap](https://github.com/users/freestylefly/projects/1)
 - Development: [Quick Start](#quick-start)
 
 ## Why WeSight
@@ -326,18 +327,13 @@ Skills can be installed, enabled, disabled, deleted, and routed from the desktop
 - Local data is stored in SQLite under the app data directory.
 - Runtime folders, build artifacts, generated assets, and local secrets are ignored by Git.
 
-## Roadmap Ideas
+## Product Roadmap
 
-- More engine adapters and runtime profiles
-- Better local configuration import and provider sync flows
-- Richer IM agent profiles and message formats
-- Shareable task templates
-- More visual inspection tools for long-running agent tasks
-- Skill marketplace updates, reviews, and version management
+Check out the [WeSight Product Roadmap](https://github.com/users/freestylefly/projects/1) for current priorities, planned features, and larger product directions. Feel free to [open an issue](https://github.com/freestylefly/wesight/issues) if there is something you want to see.
 
 ## Community WeChat Group
 
-Scan the QR code below to join the WeSight WeChat group and talk with other builders. The QR code is valid until June 8, 2026; if it expires, follow the official account below to get the latest invite.
+Scan the QR code below to join the WeSight WeChat group and talk with other builders. The QR code is valid until June 13, 2026; if it expires, follow the official account below to get the latest invite.
 
 <p align="center">
   <img src="public/readme/community/wechat-group.jpg" alt="WeSight WeChat Group" width="320">
