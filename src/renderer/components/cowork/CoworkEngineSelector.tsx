@@ -43,6 +43,16 @@ const ENGINE_OPTIONS: Array<{
     hintKey: 'coworkAgentEngineHermesHint',
   },
   {
+    engine: CoworkAgentEngine.OpenSquilla,
+    labelKey: 'coworkAgentEngineOpenSquilla',
+    hintKey: 'coworkAgentEngineOpenSquillaHint',
+  },
+  {
+    engine: CoworkAgentEngine.KimiCode,
+    labelKey: 'coworkAgentEngineKimiCode',
+    hintKey: 'coworkAgentEngineKimiCodeHint',
+  },
+  {
     engine: CoworkAgentEngine.YdCowork,
     labelKey: 'coworkAgentEngineClaudeLegacy',
     hintKey: 'coworkAgentEngineClaudeLegacyHint',
@@ -92,7 +102,9 @@ const isCliEngine = (engine: CoworkAgentEngineType): boolean => {
     || engine === CoworkAgentEngine.OpenCode
     || engine === CoworkAgentEngine.GrokBuild
     || engine === CoworkAgentEngine.QwenCode
-    || engine === CoworkAgentEngine.DeepSeekTui;
+    || engine === CoworkAgentEngine.DeepSeekTui
+    || engine === CoworkAgentEngine.OpenSquilla
+    || engine === CoworkAgentEngine.KimiCode;
 };
 
 type CliEngineStatus = ExternalAgentEnvironmentSnapshot['engines'][number];
@@ -142,6 +154,8 @@ const getCliAppTypeForEngine = (engine: CoworkAgentEngineType): ExternalAgentPro
   if (engine === CoworkAgentEngine.GrokBuild) return 'grok';
   if (engine === CoworkAgentEngine.QwenCode) return 'qwen';
   if (engine === CoworkAgentEngine.DeepSeekTui) return 'deepseek_tui';
+  if (engine === CoworkAgentEngine.OpenSquilla) return 'opensquilla';
+  if (engine === CoworkAgentEngine.KimiCode) return 'kimi';
   return null;
 };
 
@@ -154,6 +168,8 @@ const ALL_CLI_APP_TYPES: ExternalAgentProviderAppType[] = [
   'grok',
   'qwen',
   'deepseek_tui',
+  'opensquilla',
+  'kimi',
 ];
 
 /**
@@ -211,6 +227,8 @@ const CoworkEngineSelector: React.FC<CoworkEngineSelectorProps> = ({
     if (engine === CoworkAgentEngine.GrokBuild) return ExternalAgentConfigSource.LocalCli;
     if (engine === CoworkAgentEngine.QwenCode) return coworkConfig.qwenCodeConfigSource;
     if (engine === CoworkAgentEngine.DeepSeekTui) return coworkConfig.deepseekTuiConfigSource;
+    if (engine === CoworkAgentEngine.OpenSquilla) return coworkConfig.opensquillaConfigSource;
+    if (engine === CoworkAgentEngine.KimiCode) return coworkConfig.kimiCodeConfigSource;
     return ExternalAgentConfigSource.WesightModel;
   }, [coworkConfig]);
 
@@ -274,9 +292,11 @@ const CoworkEngineSelector: React.FC<CoworkEngineSelectorProps> = ({
     if (!isOpen || readOnly) {
       return;
     }
-    void refreshSnapshot({ forceRefresh: true, appTypes: ALL_CLI_APP_TYPES });
+    if (effectiveAppType) {
+      void refreshSnapshot({ forceRefresh: true, appTypes: [effectiveAppType] });
+    }
     refreshLocalProviderLists();
-  }, [isOpen, readOnly, refreshLocalProviderLists, refreshSnapshot]);
+  }, [effectiveAppType, isOpen, readOnly, refreshLocalProviderLists, refreshSnapshot]);
 
   React.useEffect(() => {
     if (!effectiveAppType || readOnly) {

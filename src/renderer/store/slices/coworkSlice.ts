@@ -5,7 +5,9 @@ import {
   DeepSeekTuiPermissionMode,
   DefaultCoworkAgentEngine,
   ExternalAgentConfigSource,
+  KimiCodePermissionMode,
   OpenCodePermissionMode,
+  OpenSquillaPermissionMode,
   QwenCodePermissionMode,
 } from '@shared/cowork/constants';
 import { type CoworkFileActivity,CoworkFileActivityStatus } from '@shared/cowork/fileActivity';
@@ -83,6 +85,10 @@ const initialState: CoworkState = {
     qwenCodePermissionMode: QwenCodePermissionMode.Auto,
     deepseekTuiConfigSource: ExternalAgentConfigSource.WesightModel,
     deepseekTuiPermissionMode: DeepSeekTuiPermissionMode.Auto,
+    opensquillaConfigSource: ExternalAgentConfigSource.LocalCli,
+    opensquillaPermissionMode: OpenSquillaPermissionMode.Bypass,
+    kimiCodeConfigSource: ExternalAgentConfigSource.LocalCli,
+    kimiCodePermissionMode: KimiCodePermissionMode.Auto,
     memoryEnabled: true,
     memoryImplicitUpdateEnabled: true,
     memoryLlmJudgeEnabled: false,
