@@ -1163,6 +1163,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
                 engineSelectorReadOnly={!canSelectRuntimeEngine}
                 showModelSelector={true}
                 modelSelectorReadOnly={!canSelectRuntimeEngine}
+                runtimeSelectorDropdownDirection="down"
                 onManageSkills={() => onShowSkills?.()}
               />
             </div>

@@ -225,6 +225,7 @@ const getKimiCodeConfigDir = (): string => path.join(homeDir(), '.kimi-code');
 const getKimiSdkConfigDir = (): string => path.join(homeDir(), '.kimi');
 const getKimiCodeConfigPath = (): string => path.join(getKimiCodeConfigDir(), 'config.toml');
 const getKimiSdkConfigPath = (): string => path.join(getKimiSdkConfigDir(), 'config.toml');
+const getKimiCodeCredentialsPath = (): string => path.join(getKimiCodeConfigDir(), 'credentials', 'kimi-code.json');
 
 const getLiveConfigPaths = (appType: ExternalAgentProviderAppType): ExternalAgentProviderListResult['liveConfigPaths'] => {
   if (appType === CLAUDE_APP_TYPE) {
@@ -279,6 +280,7 @@ const getLiveConfigPaths = (appType: ExternalAgentProviderAppType): ExternalAgen
     return {
       primaryConfigPath: getKimiCodeConfigPath(),
       secondaryConfigPaths: [
+        getKimiCodeCredentialsPath(),
         getKimiSdkConfigPath(),
         path.join(getKimiCodeConfigDir(), 'session_index.jsonl'),
         path.join(getKimiSdkConfigDir(), 'session_index.jsonl'),
@@ -438,9 +440,70 @@ const summarizeKimiCodeSettingsConfig = (
   return {
     apiKey: '',
     baseUrl: '',
-    model: provider && defaultModel ? `${provider}/${defaultModel}` : defaultModel,
+    model: defaultModel || provider,
   };
 };
+
+type KimiCodeModelRecord = {
+  id: string;
+  name: string;
+  provider: string;
+  isCurrent: boolean;
+};
+
+const listKimiCodeModelRecords = (configText: string): KimiCodeModelRecord[] => {
+  const defaultModel = extractTomlString(configText, 'default_model')
+    || extractTomlString(configText, 'defaultModel')
+    || extractTomlString(configText, 'model')
+    || DEFAULT_KIMI_CODE_LOCAL_MODEL;
+  const records: KimiCodeModelRecord[] = [];
+  const seen = new Set<string>();
+  const tablePattern = /^\s*\[models\.(?:"([^"]+)"|'([^']+)'|([^\]]+))\]\s*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = tablePattern.exec(configText)) !== null) {
+    const modelId = (match[1] ?? match[2] ?? match[3] ?? '').trim();
+    if (!modelId || seen.has(modelId)) continue;
+    seen.add(modelId);
+    const tableStart = tablePattern.lastIndex;
+    const nextTableIndex = configText.slice(tableStart).search(/^\s*\[/m);
+    const tableBody = nextTableIndex >= 0
+      ? configText.slice(tableStart, tableStart + nextTableIndex)
+      : configText.slice(tableStart);
+    const displayName = extractTomlString(tableBody, 'display_name')
+      || extractTomlString(tableBody, 'name')
+      || modelId;
+    const provider = extractTomlString(tableBody, 'provider')
+      || extractTomlString(configText, 'provider')
+      || 'kimi';
+    records.push({
+      id: modelId,
+      name: displayName,
+      provider,
+      isCurrent: modelId === defaultModel,
+    });
+  }
+  if (!seen.has(defaultModel)) {
+    records.unshift({
+      id: defaultModel,
+      name: defaultModel,
+      provider: extractTomlString(configText, 'provider') || 'kimi',
+      isCurrent: true,
+    });
+  }
+  return records;
+};
+
+const settingsConfigFromKimiCodeRecord = (
+  record: KimiCodeModelRecord,
+  configText: string,
+): Record<string, unknown> => ({
+  config: configText,
+  credentialsPath: fs.existsSync(getKimiCodeCredentialsPath()) ? getKimiCodeCredentialsPath() : '',
+  provider: record.provider,
+  defaultModel: record.id,
+  model: record.id,
+  modelName: record.name,
+});
 
 const extractCodexProviderBaseUrl = (configText: string): string => {
   const provider = extractTomlString(configText, 'model_provider');
@@ -1085,7 +1148,7 @@ export class ExternalAgentProviderStore {
       return;
     }
     if (appType === KIMI_APP_TYPE) {
-      this.refreshLiveProviderSnapshot(appType);
+      this.syncKimiCodeLiveProviders();
       return;
     }
     const hasCurrent = Boolean(this.getCurrentProviderId(appType));
@@ -1331,6 +1394,56 @@ export class ExternalAgentProviderStore {
     }
   }
 
+  private syncKimiCodeLiveProviders(): void {
+    const primaryPath = fs.existsSync(getKimiCodeConfigPath())
+      ? getKimiCodeConfigPath()
+      : getKimiSdkConfigPath();
+    if (!fs.existsSync(primaryPath)) {
+      this.importLiveProviderIfEmpty(KIMI_APP_TYPE);
+      return;
+    }
+    const configText = fs.readFileSync(primaryPath, 'utf8');
+    const records = listKimiCodeModelRecords(configText);
+    this.db
+      .prepare('DELETE FROM external_agent_providers WHERE app_type = ? AND category = ?')
+      .run(KIMI_APP_TYPE, 'local');
+    const now = Date.now();
+    for (const record of records) {
+      const recordId = `local-${crypto.createHash('sha1').update(record.id).digest('hex').slice(0, 16)}`;
+      this.db
+        .prepare(
+          `
+          INSERT INTO external_agent_providers (
+            id, app_type, name, settings_config, category, is_current, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id, app_type) DO UPDATE SET
+            name = excluded.name,
+            settings_config = excluded.settings_config,
+            category = excluded.category,
+            is_current = excluded.is_current,
+            updated_at = excluded.updated_at
+        `,
+        )
+        .run(
+          recordId,
+          KIMI_APP_TYPE,
+          record.name,
+          JSON.stringify(settingsConfigFromKimiCodeRecord(record, configText)),
+          'local',
+          record.isCurrent ? 1 : 0,
+          now,
+          now,
+        );
+    }
+    if (!records.some((record) => record.isCurrent) && records[0]) {
+      const fallbackId = `local-${crypto.createHash('sha1').update(records[0].id).digest('hex').slice(0, 16)}`;
+      this.db
+        .prepare('UPDATE external_agent_providers SET is_current = 1 WHERE app_type = ? AND id = ?')
+        .run(KIMI_APP_TYPE, fallbackId);
+    }
+  }
+
   private mapProviderRow(row: ExternalAgentProviderRow): ExternalAgentProvider {
     let settingsConfig: Record<string, unknown> = {};
     try {
@@ -1463,6 +1576,7 @@ export class ExternalAgentProviderStore {
         || 'kimi';
       return {
         config: configText,
+        credentialsPath: fs.existsSync(getKimiCodeCredentialsPath()) ? getKimiCodeCredentialsPath() : '',
         provider,
         defaultModel,
         model: defaultModel,

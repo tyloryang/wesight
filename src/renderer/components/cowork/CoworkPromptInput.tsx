@@ -186,6 +186,7 @@ interface CoworkPromptInputProps {
   effectiveEngine?: CoworkAgentEngine;
   showModelSelector?: boolean;
   modelSelectorReadOnly?: boolean;
+  runtimeSelectorDropdownDirection?: 'up' | 'down';
   lockedRuntimeSnapshot?: CoworkSessionRuntimeSnapshot | null;
   onManageSkills?: () => void;
   onSlashCommand?: CoworkSlashCommandHandler;
@@ -211,6 +212,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       effectiveEngine,
       showModelSelector = false,
       modelSelectorReadOnly = false,
+      runtimeSelectorDropdownDirection = 'up',
       lockedRuntimeSnapshot = null,
       onManageSkills,
       onSlashCommand,
@@ -850,7 +852,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
           )}
           {showModelSelector && (
             <CoworkModelSelector
-              dropdownDirection="up"
+              dropdownDirection={runtimeSelectorDropdownDirection}
               effectiveEngine={lockedRuntimeSnapshot?.agentEngine}
             />
           )}
@@ -861,19 +863,19 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       <div className="flex min-w-0 items-center gap-1.5">
         {shouldShowClaudePermissionSelector && (
           <ClaudePermissionModeSelector
-            dropdownDirection="up"
+            dropdownDirection={runtimeSelectorDropdownDirection}
             disabled={disabled || isStreaming}
           />
         )}
         {shouldShowKimiPermissionSelector && (
           <KimiPermissionModeSelector
-            dropdownDirection="up"
+            dropdownDirection={runtimeSelectorDropdownDirection}
             disabled={disabled || isStreaming}
           />
         )}
         {showEngineSelector && (
           <CoworkEngineSelector
-            dropdownDirection="up"
+            dropdownDirection={runtimeSelectorDropdownDirection}
             value={selectorEngine}
             readOnly={engineSelectorReadOnly}
             readOnlyTitle={i18nService.t('coworkAgentEngineReadOnly')}
@@ -881,7 +883,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
         )}
         {showModelSelector && (
           <CoworkModelSelector
-            dropdownDirection="up"
+            dropdownDirection={runtimeSelectorDropdownDirection}
             readOnly={modelSelectorReadOnly}
             effectiveEngine={selectorEngine}
           />

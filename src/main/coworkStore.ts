@@ -82,6 +82,7 @@ const DEFAULT_MEMORY_LLM_JUDGE_ENABLED = false;
 const DEFAULT_MEMORY_GUARD_LEVEL: CoworkMemoryGuardLevel = 'strict';
 const DEFAULT_MEMORY_USER_MEMORIES_MAX_ITEMS = 12;
 const DEFAULT_EXTERNAL_AGENT_CONFIG_SOURCE: ExternalAgentConfigSourceType = ExternalAgentConfigSource.WesightModel;
+const DEFAULT_CLAUDE_CODE_CONFIG_SOURCE: ExternalAgentConfigSourceType = ExternalAgentConfigSource.LocalCli;
 const DEFAULT_CODEX_CONFIG_SOURCE: ExternalAgentConfigSourceType = ExternalAgentConfigSource.LocalCli;
 const OPENCLAW_GLOBAL_CONFIG_PATH = path.join(os.homedir(), '.openclaw', 'openclaw.json');
 const HERMES_GLOBAL_CONFIG_PATH = path.join(os.homedir(), '.hermes', 'config.yaml');
@@ -491,6 +492,13 @@ function normalizeExternalAgentConfigSource(value?: string | null): ExternalAgen
     return value;
   }
   return DEFAULT_EXTERNAL_AGENT_CONFIG_SOURCE;
+}
+
+function normalizeClaudeCodeConfigSource(value?: string | null): ExternalAgentConfigSourceType {
+  if (isExternalAgentConfigSource(value)) {
+    return value;
+  }
+  return DEFAULT_CLAUDE_CODE_CONFIG_SOURCE;
 }
 
 function normalizeCodexConfigSource(value?: string | null): ExternalAgentConfigSourceType {
@@ -1885,7 +1893,7 @@ export class CoworkStore {
         executionMode: 'local' as CoworkExecutionMode,
         agentEngine: normalizeCoworkAgentEngineValue(cfg.get('agentEngine')),
         openclawConfigSource: normalizeOpenClawConfigSource(cfg.get('openclawConfigSource')),
-        claudeCodeConfigSource: normalizeExternalAgentConfigSource(cfg.get('claudeCodeConfigSource')),
+        claudeCodeConfigSource: normalizeClaudeCodeConfigSource(cfg.get('claudeCodeConfigSource')),
         claudeCodePermissionMode: normalizeClaudeCodePermissionMode(cfg.get('claudeCodePermissionMode')),
         codexConfigSource: normalizeCodexConfigSource(cfg.get('codexConfigSource')),
         hermesConfigSource: normalizeHermesConfigSource(cfg.get('hermesConfigSource')),
@@ -1934,7 +1942,7 @@ export class CoworkStore {
         entries.push(['openclawConfigSource', normalizeExternalAgentConfigSource(config.openclawConfigSource)]);
       }
       if (config.claudeCodeConfigSource !== undefined) {
-        entries.push(['claudeCodeConfigSource', normalizeExternalAgentConfigSource(config.claudeCodeConfigSource)]);
+        entries.push(['claudeCodeConfigSource', normalizeClaudeCodeConfigSource(config.claudeCodeConfigSource)]);
       }
       if (config.claudeCodePermissionMode !== undefined) {
         entries.push(['claudeCodePermissionMode', normalizeClaudeCodePermissionMode(config.claudeCodePermissionMode)]);

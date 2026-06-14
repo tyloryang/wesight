@@ -1629,17 +1629,8 @@ const ThinkingBlock: React.FC<{
   mapDisplayText?: (value: string) => string;
 }> = ({ message, mapDisplayText }) => {
   const isCurrentlyStreaming = Boolean(message.metadata?.isStreaming);
-  const [isExpanded, setIsExpanded] = useState(isCurrentlyStreaming);
+  const [isExpanded, setIsExpanded] = useState(false);
   const displayContent = mapDisplayText ? mapDisplayText(message.content) : message.content;
-
-  // Auto-expand while streaming, auto-collapse when streaming completes
-  useEffect(() => {
-    if (isCurrentlyStreaming) {
-      setIsExpanded(true);
-    } else {
-      setIsExpanded(false);
-    }
-  }, [isCurrentlyStreaming]);
 
   return (
     <div className="rounded-lg border border-border overflow-hidden">

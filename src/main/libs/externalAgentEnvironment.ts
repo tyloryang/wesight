@@ -269,6 +269,10 @@ const getKimiCodeConfigDir = (): string => path.join(homeDir(), '.kimi-code');
 
 const getKimiSdkConfigDir = (): string => path.join(homeDir(), '.kimi');
 
+const getKimiCodeBinDir = (): string => path.join(getKimiCodeConfigDir(), 'bin');
+
+const getKimiCodeCredentialsPath = (): string => path.join(getKimiCodeConfigDir(), 'credentials', 'kimi-code.json');
+
 const getNestedRecord = (value: unknown, key: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const nested = (value as Record<string, unknown>)[key];
@@ -594,6 +598,7 @@ const buildAuthPathCandidates = (
       path.join(configDir, 'auth.json'),
       path.join(configDir, 'credentials.json'),
       path.join(configDir, 'oauth.json'),
+      getKimiCodeCredentialsPath(),
       path.join(sdkDir, 'config.toml'),
       path.join(sdkDir, 'auth.json'),
       path.join(sdkDir, 'credentials.json'),
@@ -784,6 +789,7 @@ const buildProbeEnv = (
     process.env.PATH ?? '',
     path.join(homeDir(), '.npm-global', 'bin'),
     path.join(homeDir(), '.local', 'bin'),
+    getKimiCodeBinDir(),
     '/opt/homebrew/bin',
     '/usr/local/bin',
   ];
@@ -863,6 +869,8 @@ const getWindowsSearchPaths = (command: string): string[] => {
   if (command === 'kimi') {
     return [
       path.join(appData, 'npm', 'kimi.cmd'),
+      path.join(home, '.kimi-code', 'bin', 'kimi.exe'),
+      path.join(home, '.kimi-code', 'bin', 'kimi'),
       path.join(home, '.local', 'bin', 'kimi.exe'),
       path.join(home, '.local', 'bin', 'kimi'),
     ];
@@ -1043,6 +1051,7 @@ const buildCliConfigSnapshot = (
                 path.join(configDir, 'skills'),
                 path.join(configDir, 'mcp.json'),
                 path.join(getKimiCodeConfigDir(), 'config.toml'),
+                getKimiCodeCredentialsPath(),
                 path.join(getKimiCodeConfigDir(), 'session_index.jsonl'),
                 path.join(getKimiCodeConfigDir(), 'skills'),
                 path.join(getKimiSdkConfigDir(), 'config.toml'),

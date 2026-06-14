@@ -75,7 +75,7 @@ const initialState: CoworkState = {
     executionMode: 'local',
     agentEngine: DefaultCoworkAgentEngine,
     openclawConfigSource: ExternalAgentConfigSource.LocalCli,
-    claudeCodeConfigSource: ExternalAgentConfigSource.WesightModel,
+    claudeCodeConfigSource: ExternalAgentConfigSource.LocalCli,
     claudeCodePermissionMode: ClaudeCodePermissionMode.BypassPermissions,
     codexConfigSource: ExternalAgentConfigSource.LocalCli,
     hermesConfigSource: ExternalAgentConfigSource.WesightModel,

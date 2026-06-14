@@ -98,6 +98,11 @@ const COWORK_AGENT_ENGINE_OPTIONS: Array<{
   hintKey: string;
 }> = [
   {
+    value: CoworkAgentEngineValue.ClaudeCode,
+    labelKey: 'coworkAgentEngineClaudeCode',
+    hintKey: 'coworkAgentEngineClaudeCodeHint',
+  },
+  {
     value: CoworkAgentEngineValue.OpenClaw,
     labelKey: 'coworkAgentEngineOpenClaw',
     hintKey: 'coworkAgentEngineOpenClawHint',
@@ -121,11 +126,6 @@ const COWORK_AGENT_ENGINE_OPTIONS: Array<{
     value: CoworkAgentEngineValue.YdCowork,
     labelKey: 'coworkAgentEngineClaudeLegacy',
     hintKey: 'coworkAgentEngineClaudeLegacyHint',
-  },
-  {
-    value: CoworkAgentEngineValue.ClaudeCode,
-    labelKey: 'coworkAgentEngineClaudeCode',
-    hintKey: 'coworkAgentEngineClaudeCodeHint',
   },
   {
     value: CoworkAgentEngineValue.Codex,
@@ -976,7 +976,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     coworkConfig.openclawConfigSource ?? ExternalAgentConfigSourceValue.LocalCli,
   );
   const [claudeCodeConfigSource, setClaudeCodeConfigSource] = useState<ExternalAgentConfigSource>(
-    coworkConfig.claudeCodeConfigSource ?? ExternalAgentConfigSourceValue.WesightModel,
+    coworkConfig.claudeCodeConfigSource ?? ExternalAgentConfigSourceValue.LocalCli,
   );
   const [claudeCodePermissionMode, setClaudeCodePermissionMode] = useState<ClaudeCodePermissionMode>(
     coworkConfig.claudeCodePermissionMode ?? ClaudeCodePermissionModeValue.BypassPermissions,
@@ -1056,7 +1056,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   useEffect(() => {
     setCoworkAgentEngine(coworkConfig.agentEngine || CoworkAgentEngineValue.YdCowork);
     setOpenClawConfigSource(coworkConfig.openclawConfigSource ?? ExternalAgentConfigSourceValue.LocalCli);
-    setClaudeCodeConfigSource(coworkConfig.claudeCodeConfigSource ?? ExternalAgentConfigSourceValue.WesightModel);
+    setClaudeCodeConfigSource(coworkConfig.claudeCodeConfigSource ?? ExternalAgentConfigSourceValue.LocalCli);
     setClaudeCodePermissionMode(coworkConfig.claudeCodePermissionMode ?? ClaudeCodePermissionModeValue.BypassPermissions);
     setCodexConfigSource(coworkConfig.codexConfigSource ?? ExternalAgentConfigSourceValue.LocalCli);
     setHermesConfigSource(coworkConfig.hermesConfigSource ?? ExternalAgentConfigSourceValue.WesightModel);
@@ -4160,6 +4160,17 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
         hintKey: selectedExternalAgentAppType === 'kimi'
           ? 'coworkAgentKimiCodeLocalConfigHint'
           : 'coworkAgentOpenSquillaLocalConfigHint',
+      },
+    ] : selectedExternalAgentAppType === 'claude' ? [
+      {
+        value: ExternalAgentConfigSourceValue.LocalCli,
+        labelKey: 'coworkAgentConfigSourceClaudeLocal',
+        hintKey: 'coworkAgentConfigSourceClaudeLocalHint',
+      },
+      {
+        value: ExternalAgentConfigSourceValue.WesightModel,
+        labelKey: 'coworkAgentConfigSourceWesightModel',
+        hintKey: 'coworkAgentConfigSourceClaudeWesightHint',
       },
     ] : [
       {
