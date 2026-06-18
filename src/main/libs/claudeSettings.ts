@@ -29,6 +29,7 @@ type ProviderConfig = {
   enabled: boolean;
   apiKey: string;
   baseUrl: string;
+  headers?: Record<string, string>;
   apiFormat?: 'anthropic' | 'openai' | 'native';
   codingPlanEnabled?: boolean;
   oauthCredentials?: QwenOAuthCredentials;
@@ -148,6 +149,32 @@ function getEffectiveProviderApiFormat(providerName: string, apiFormat: unknown)
 
 function providerRequiresApiKey(providerName: string): boolean {
   return providerName !== ProviderName.Ollama;
+}
+
+const CODEXZH_HOST_RE = /(^|\.)codexzh\.com$/i;
+
+function resolveOpenClawProviderHeaders(
+  baseURL?: string,
+  explicitHeaders?: Record<string, string>,
+): Record<string, string> | undefined {
+  const headers = explicitHeaders ? { ...explicitHeaders } : {};
+
+  try {
+    const hostname = baseURL ? new URL(baseURL).hostname : '';
+    if (hostname && CODEXZH_HOST_RE.test(hostname)) {
+      headers['User-Agent'] ??= 'Mozilla/5.0';
+      headers['X-Stainless-Lang'] ??= '';
+      headers['X-Stainless-Package-Version'] ??= '';
+      headers['X-Stainless-OS'] ??= '';
+      headers['X-Stainless-Arch'] ??= '';
+      headers['X-Stainless-Runtime'] ??= '';
+      headers['X-Stainless-Runtime-Version'] ??= '';
+    }
+  } catch {
+    // Ignore invalid URLs here; downstream validation handles malformed base URLs.
+  }
+
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 function tryWesightServerFallback(modelId?: string): MatchedProvider | null {
@@ -685,6 +712,7 @@ export type ProviderRawConfig = {
   providerName: string;
   baseURL: string;
   apiKey: string;
+  headers?: Record<string, string>;
   apiType: 'anthropic' | 'openai';
   codingPlanEnabled: boolean;
   models: Array<{ id: string; name?: string; supportsImage?: boolean }>;
@@ -725,6 +753,7 @@ export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
       providerName,
       baseURL: effectiveBaseURL,
       apiKey: apiKey || 'sk-wesight-local',
+      headers: resolveOpenClawProviderHeaders(effectiveBaseURL, providerConfig.headers),
       apiType: effectiveApiFormat === 'anthropic' ? 'anthropic' : 'openai',
       codingPlanEnabled: !!providerConfig.codingPlanEnabled,
       models,

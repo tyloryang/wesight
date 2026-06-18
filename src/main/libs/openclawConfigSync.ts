@@ -414,6 +414,7 @@ type OpenClawProviderSelection = {
     api: OpenClawProviderApi;
     apiKey: string;
     auth: 'api-key';
+    headers?: Record<string, string>;
     models: Array<{
       id: string;
       name: string;
@@ -649,6 +650,7 @@ const resolveDescriptor = (
 export const buildProviderSelection = (options: {
   apiKey: string;
   baseURL: string;
+  headers?: Record<string, string>;
   modelId: string;
   apiType: 'anthropic' | 'openai' | undefined;
   providerName?: string;
@@ -679,6 +681,9 @@ export const buildProviderSelection = (options: {
 
   const providerModelName = resolveModelDisplayName(sessionModelId, options.modelName);
   const modelInput: string[] = options.supportsImage ? ['text', 'image'] : ['text'];
+  const providerHeaders = options.headers && Object.keys(options.headers).length > 0
+    ? { ...options.headers }
+    : undefined;
 
   // reasoning：descriptor 动态计算 > modelDefaults 静态值
   const reasoning = descriptor.resolveModelReasoning
@@ -695,6 +700,7 @@ export const buildProviderSelection = (options: {
       api,
       apiKey,
       auth: 'api-key',
+      ...(providerHeaders ? { headers: providerHeaders } : {}),
       models: [
         {
           id: sessionModelId,
@@ -988,6 +994,7 @@ export class OpenClawConfigSync {
         const sel = buildProviderSelection({
           apiKey: p.apiKey,
           baseURL: p.baseURL,
+          headers: p.headers,
           modelId: m.id,
           apiType: p.apiType,
           providerName: p.providerName,
